@@ -59,6 +59,7 @@ let
               volumeMounts = {
                 _namedlist = true;
                 nix.mountPath = "/nix";
+                nix.readOnly = true;
                 run.mountPath = "/run";
                 tmp.mountPath = "/tmp";
                 cgroup.mountPath = "/sys/fs/cgroup";

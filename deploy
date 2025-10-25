@@ -1,0 +1,6 @@
+#! /usr/bin/env fish
+
+nix run --file . imageToContainerd || return 1
+# kubectl delete daemonsets.apps nix-csi-node
+nix run --file . kubenixEval.deploymentScript -- --yes --prune || return 1
+# kubectl delete pod nix-cache-0

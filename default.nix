@@ -75,12 +75,26 @@ let
         ./kubenix
         {
           config = {
-            nix-csi.image = imageRef;
-            nix-csi.cache = {
-              enable = true;
-              storageClassName = "local-path";
+            nix-csi = {
+              namespace = "nix-csi";
+              image = imageRef;
+              cache = {
+                enable = true;
+                storageClassName = "local-path";
+              };
+              ctest = {
+                enable = true;
+                replicas = 0;
+              };
             };
-            kluctl.discriminator = "nix-csi";
+            kluctl = {
+              discriminator = "nix-csi";
+              pushManifest = {
+                enable = true;
+                to = "ssh://root@192.168.88.20";
+                failCachePush = false;
+              };
+            };
           };
         }
       ];
