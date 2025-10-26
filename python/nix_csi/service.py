@@ -182,7 +182,7 @@ class NodeServicer(csi_grpc.NodeBase):
     # Locks that prevents the same expression to be processed in parallel
     expressionLock: defaultdict[str, Semaphore] = defaultdict(Semaphore)
     # Locks that prevent the same derivation to be uploaded in parallel
-    copyLock: defaultdict[str, Semaphore] = defaultdict(Semaphore)
+    copyLock: defaultdict[Path, Semaphore] = defaultdict(Semaphore)
 
     async def NodePublishVolume(self, stream):
         request: csi_pb2.NodePublishVolumeRequest | None = await stream.recv_message()
@@ -467,10 +467,11 @@ class NodeServicer(csi_grpc.NodeBase):
         reply = csi_pb2.NodePublishVolumeResponse()
         await stream.send_message(reply)
 
-        async def copyToCache(packagePath: str):
+        async def copyToCache(packagePath: Path):
             # Only run one copy per path per time
             async with self.copyLock[packagePath]:
-                paths = []
+                paths = [str(packagePath)]
+                # Get all paths recursively++
                 pathInfoDrv = await run_captured(
                     "nix",
                     "path-info",
@@ -481,21 +482,6 @@ class NodeServicer(csi_grpc.NodeBase):
                 if pathInfoDrv.returncode == 0:
                     paths += pathInfoDrv.stdout.splitlines()
 
-                pathInfo = await run_captured(
-                    "nix",
-                    "path-info",
-                    "--recursive",
-                    packagePath,
-                )
-                if pathInfo.returncode == 0:
-                    paths += pathInfo.stdout.splitlines()
-
-                if pathInfoDrv.returncode != 0 and pathInfo.returncode != 0:
-                    logger.error(
-                        "Unable to copy because path-info failed, shouldn't be possible"
-                    )
-                    return
-
                 # Unique the paths since we're running path-info twice
                 paths = list(set(paths))
                 # Filter derivation files
@@ -504,21 +490,13 @@ class NodeServicer(csi_grpc.NodeBase):
                 paths = {p for p in paths if p not in self.copyPathsCache}
                 if len(paths) > 0:
                     for _ in range(6):
-                        nixCopy = await run_captured(
-                            "nix", "copy", "--to", "ssh://nix-cache", *paths
-                        )
+                        await asyncio.sleep(5)
+                        nixCopy = await run_console("/scripts/upload", *paths)
                         if nixCopy.returncode == 0:
-                            logger.info(
-                                f"{len(paths)} paths copied to cache in {nixCopy.elapsed:.2f} seconds"
-                            )
                             for path in paths:
                                 self.copyPathsCache[path] = None
                             break
-                        else:
-                            logger.error(
-                                f"nix copy failed: {nixCopy.returncode=}\n{nixCopy.combined=}"
-                            )
-                        await asyncio.sleep(10)
+                        await asyncio.sleep(5)
 
         if os.getenv("BUILD_CACHE") == "true":
             asyncio.create_task(copyToCache(packagePath))
@@ -563,7 +541,6 @@ class NodeServicer(csi_grpc.NodeBase):
         request: csi_pb2.NodeGetCapabilitiesRequest | None = await stream.recv_message()
         if request is None:
             raise ValueError("NodeGetCapabilitiesRequest is None")
-        # log_request("NodeGetCapabilities", request)
         reply = csi_pb2.NodeGetCapabilitiesResponse(capabilities=[])
         await stream.send_message(reply)
 
@@ -571,7 +548,6 @@ class NodeServicer(csi_grpc.NodeBase):
         request: csi_pb2.NodeGetInfoRequest | None = await stream.recv_message()
         if request is None:
             raise ValueError("NodeGetInfoRequest is None")
-        # log_request("NodeGetInfo", request)
         reply = csi_pb2.NodeGetInfoResponse(
             node_id=str(os.environ.get("KUBE_NODE_NAME")),
         )
