@@ -40,6 +40,10 @@ in
         "nix.conf" = ''
           # Use nix daemon for builds
           store = daemon
+          # Users who can do supernixxy things
+          trusted-users = root nix
+          # Allow everyone to Nix!
+          allowed-users = *
           # Use root as builder since that's the only user in the container.
           build-users-group = nobody
           # Auto allocare uids so we don't have to create lots of users in containers
