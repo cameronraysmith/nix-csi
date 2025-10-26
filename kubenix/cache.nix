@@ -1,6 +1,8 @@
 { config, lib, ... }:
 let
   cfg = config.nix-csi;
+  nsRes = config.kubernetes.resources.${cfg.namespace};
+  hashAttrs = attrs: builtins.hashString "md5" (builtins.toJSON attrs);
 in
 {
   options.nix-csi.cache = {
@@ -53,12 +55,11 @@ in
           selector.matchLabels.app = "nix-cache";
           template = {
             metadata.labels.app = "nix-cache";
-            metadata.annotations.harmoniaHash = builtins.hashString "md5" (
-              builtins.toJSON config.kubernetes.resources.${cfg.namespace}.ConfigMap.harmonia
-            );
-            metadata.annotations.sshHash = builtins.hashString "md5" (
-              builtins.toJSON config.kubernetes.resources.${cfg.namespace}.Secret.sshd
-            );
+
+            metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-config;
+            metadata.annotations.scriptsHash = hashAttrs nsRes.ConfigMap.nix-scripts;
+            metadata.annotations.harmoniaHash = hashAttrs nsRes.ConfigMap.harmonia;
+            metadata.annotations.sshHash = hashAttrs nsRes.Secret.sshd;
             spec = {
               initContainers = [
                 {
