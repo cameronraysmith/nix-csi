@@ -352,6 +352,15 @@ class NodeServicer(csi_grpc.NodeBase):
             logger.debug("Package closure path-info")
 
         try:
+            # Install CSI gcroots
+            csiGcroot = await run_captured(
+                "nix", "build", "--out-link", gcPath, packagePath
+            )
+            if csiGcroot.returncode != 0:
+                raise NixCsiError(
+                    Status.INTERNAL,
+                    f"failed to install CSI gcroots {csiGcroot.returncode=} {csiGcroot.stdout=} {csiGcroot.stderr=}",
+                )
             # Copy closure to substore, rsync saves a lot of implementation
             # headache here. --archive keeps all attributes, --hard-links
             # hardlinks everything hardlinkable.
@@ -372,36 +381,6 @@ class NodeServicer(csi_grpc.NodeBase):
                         Status.INTERNAL,
                         f"rsync failed {rsync.returncode=} {rsync.stderr=}",
                     )
-
-            # Link root derivation to /nix/var/result in the container. This is a "well-know" path
-            lnResult = await run_captured(
-                "ln",
-                "--force",
-                "--symbolic",
-                packagePath,
-                volumeRoot / "nix/var/result",
-            )
-            if lnResult.returncode != 0:
-                raise NixCsiError(
-                    Status.INTERNAL,
-                    f"ln1 failed {lnResult.returncode=} {lnResult.stdout=} {lnResult.stderr=}",
-                )
-
-            # gcroots in container
-            (NIX_STATE_DIR / "gcroots").mkdir(parents=True, exist_ok=True)
-            lnRoots = await run_captured(
-                "ln",
-                "--force",
-                "--symbolic",
-                "/nix/var/result",
-                NIX_STATE_DIR / "gcroots" / "result",
-            )
-            if lnRoots.returncode != 0:
-                raise NixCsiError(
-                    Status.INTERNAL,
-                    f"ln2 failed {lnRoots.returncode=} {lnRoots.stdout=} {lnRoots.stderr=}",
-                )
-
             # Create Nix database
             # This is an execline script that runs nix-store --dump-db | NIX_STATE_DIR=something nix-store --load-db
             nix_init_db = await run_captured(
@@ -413,6 +392,36 @@ class NodeServicer(csi_grpc.NodeBase):
                 raise NixCsiError(
                     Status.INTERNAL,
                     f"nix_init_db failed {nix_init_db.returncode=} {nix_init_db.stdout=} {nix_init_db.stderr=}",
+                )
+            # install gcroots in container
+            gcroot = await run_captured(
+                "nix",
+                "build",
+                "--store",
+                volumeRoot,
+                "--out-link",
+                NIX_STATE_DIR / "gcroots/result",
+                packagePath,
+            )
+            if gcroot.returncode != 0:
+                raise NixCsiError(
+                    Status.INTERNAL,
+                    f"failed to install container gcroots {gcroot.returncode=} {gcroot.stdout=} {gcroot.stderr=}",
+                )
+            # install /nix/var/result in container
+            result = await run_captured(
+                "nix",
+                "build",
+                "--store",
+                volumeRoot,
+                "--out-link",
+                volumeRoot / "nix/var/result",
+                packagePath,
+            )
+            if result.returncode != 0:
+                raise NixCsiError(
+                    Status.INTERNAL,
+                    f"failed to install container result {result.returncode=} {result.stdout=} {result.stderr=}",
                 )
         except NixCsiError as ex:
             # Remove gcroots if we failed something else
@@ -517,10 +526,10 @@ class NodeServicer(csi_grpc.NodeBase):
             if umount.returncode != 0:
                 errors.append(f"umount failed {umount.returncode=} {umount.stderr=}")
 
-        gcroot_path = CSI_GCROOTS / request.volume_id
-        if gcroot_path.exists():
+        gcPath = CSI_GCROOTS / request.volume_id
+        if gcPath.exists():
             try:
-                gcroot_path.unlink()
+                gcPath.unlink()
             except Exception as ex:
                 errors.append(f"gcroot unlink failed: {ex}")
 
