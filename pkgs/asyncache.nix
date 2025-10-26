@@ -9,7 +9,7 @@
   poetry-core,
 }:
 let
-  cachetools600 = cachetools.overrideAttrs rec {
+  cachetools552 = cachetools.overrideAttrs rec {
     version = "5.5.2";
     src = fetchFromGitHub {
       owner = "tkem";
@@ -34,7 +34,7 @@ buildPythonPackage rec {
   ];
 
   dependencies = [
-    cachetools600
+    cachetools552
   ];
 
   meta = with lib; {
