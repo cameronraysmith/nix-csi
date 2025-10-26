@@ -16,7 +16,6 @@ let
         mkdir --parents $HOME
         rsync --archive ${pkgs.dockerTools.binSh}/ /
         rsync --archive ${pkgs.dockerTools.caCertificates}/ /
-        rsync --archive ${pkgs.dockerTools.fakeNss}/ /
         rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
         source /scripts/build
       '';
@@ -25,6 +24,10 @@ let
     modules = [
       {
         config = {
+          users = {
+            enable = true;
+            users.root.shell = pkgs.runtimeShell;
+          };
           services.boot.depends-on = [ "nix-csi" ];
           services.nix-csi = {
             command = "${lib.getExe pkgs.nix-csi} --loglevel DEBUG";
@@ -36,16 +39,19 @@ let
             ];
           };
           services.nix-daemon = {
+            env-file.variables.HOME = "/root";
             command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store local";
             depends-on = [ "setup" ];
           };
           services.gc = {
             type = "scripted";
-            command = pkgs.writeScriptBin "gc" # bash
-            ''
-              nix build --out-link /nix/var/result /nix/var/result
-              nix store gc
-            '';
+            command =
+              pkgs.writeScriptBin "gc" # bash
+                ''
+                  # Fix gcroots for /nix/var/result
+                  nix build --out-link /nix/var/result /nix/var/result
+                  nix store gc
+                '';
             options = [ "shares-console" ];
             depends-on = [
               "nix-daemon"
@@ -74,12 +80,11 @@ let
                   mkdir --parents /tmp
                   mkdir --parents /run
                   mkdir --parents ''${HOME}
-                  rsync --archive ${pkgs.dockerTools.fakeNss}/ /
                   rsync --archive ${pkgs.dockerTools.binSh}/ /
                   rsync --archive ${pkgs.dockerTools.caCertificates}/ /
                   rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
                   # Tricking OpenSSH's security policies, allow this to fail, sshc might not exist
-                  rsync --archive --copy-links --chmod=600 /etc/sshc/ $HOME/.ssh/ || true
+                  rsync --archive --copy-links --chmod=D700,F600 /etc/sshc/ /root/.ssh/ || true
                 ''
             );
           };
@@ -98,7 +103,6 @@ let
             pkgs.lix
           ]
         }:$PATH
-        rsync --archive ${pkgs.dockerTools.fakeNss}/ /
         nix copy --store local --to /nix-volume --no-check-sigs $(nix path-info --store local --all)
         nix build --store /nix-volume --out-link /nix-volume/nix/var/result ${pathEnv}
       '';
