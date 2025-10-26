@@ -4,47 +4,49 @@ let
 in
 {
   options.nix-csi.cache = {
-    enable = lib.mkEnableOption "nix-serve-ng";
+    enable = lib.mkEnableOption "harmonia";
     storageClassName = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
     };
   };
   config = lib.mkIf cfg.cache.enable {
     kubernetes.resources.${cfg.namespace} = {
-      # Mounts to /etc/nix-serve
-      Secret.nix-serve = {
-        stringData.secret = builtins.readFile ../cache-secret;
-      };
-
       # Mounts to /etc/ssh
-      Secret.sshd = {
-        stringData = {
-          authorized_keys = builtins.readFile ../id_ed25519.pub;
-          id_ed25519 = builtins.readFile ../id_ed25519;
-          sshd_config = # sshd
-            ''
-              Port 22
-              AddressFamily Any
+      Secret.sshd.stringData = {
+        authorized_keys = builtins.readFile ../id_ed25519.pub;
+        id_ed25519 = builtins.readFile ../id_ed25519;
+        sshd_config = # ssh
+          ''
+            Port 22
+            AddressFamily Any
 
-              HostKey /etc/ssh/id_ed25519
+            HostKey /etc/ssh/id_ed25519
 
-              SyslogFacility DAEMON
-              SetEnv PATH=/nix/var/result/bin
+            SyslogFacility DAEMON
+            LogLevel DEBUG3
+            SetEnv PATH=/nix/var/result/bin
 
-              PermitRootLogin prohibit-password
-              PubkeyAuthentication yes
-              PasswordAuthentication no
-              ChallengeResponseAuthentication no
-              UsePAM no
+            PermitRootLogin prohibit-password
+            PubkeyAuthentication yes
+            PasswordAuthentication no
+            ChallengeResponseAuthentication no
+            UsePAM no
 
-              AuthorizedKeysFile /etc/ssh/authorized_keys
+            AuthorizedKeysFile %h/.ssh/authorized_keys /etc/ssh/authorized_keys
 
-              StrictModes no
+            StrictModes no
 
-              Subsystem sftp internal-sftp
-            '';
-        };
+            Subsystem sftp internal-sftp
+          '';
       };
+      Secret.harmonia.stringData.sign_key = builtins.readFile ../cache-secret;
+      ConfigMap.harmonia.data."config.toml" = # TOML
+      ''
+        bind = "[::]:80"
+        virtual_nix_store = "/nix/store"
+        real_nix_store = "/content/nix/store"
+        sign_key_paths = [ "/var/run/secrets/harmonia/sign_key" ]
+      '';
 
       StatefulSet.nix-cache = {
         spec = {
@@ -53,51 +55,22 @@ in
           selector.matchLabels.app = "nix-cache";
           template = {
             metadata.labels.app = "nix-cache";
+            metadata.annotations.harmoniaHash = builtins.hashString "md5" (builtins.toJSON config.kubernetes.resources.${cfg.namespace}.ConfigMap.harmonia);
+            metadata.annotations.sshHash = builtins.hashString "md5" (builtins.toJSON config.kubernetes.resources.${cfg.namespace}.Secret.sshd);
             spec = {
-              initContainers = [
-                {
-                  name = "populate-nix";
-                  command = [ "initCopy" ];
-                  image = "quay.io/nix-csi/scratch:1.0.0";
-                  env = [
-                    {
-                      name = "PATH";
-                      value = "/nix/var/result/bin";
-                    }
-                  ];
-                  volumeMounts = [
-                    {
-                      name = "nix-csi";
-                      mountPath = "/nix";
-                    }
-                    {
-                      name = "nix-cache";
-                      mountPath = "/nix-volume";
-                    }
-                    {
-                      name = "nix-config";
-                      mountPath = "/etc/nix";
-                    }
-                  ];
-                }
-              ];
-              containers = [
-                {
-                  name = "nix-serve";
+              containers = {
+                _namedlist = true;
+                nix-serve = {
                   command = [ "dinit" ];
-                  image = "quay.io/nix-csi/scratch:1.0.0";
+                  image = "quay.io/nix-csi/scratch:1.0.1";
                   env = [
-                    {
-                      name = "PATH";
-                      value = "/nix/var/result/bin";
-                    }
                     {
                       name = "HOME";
                       value = "/var/empty";
                     }
                     {
-                      name = "NIX_SECRET_KEY_FILE";
-                      value = "/etc/nix-serve/secret";
+                      name = "CONFIG_FILE";
+                      value = "/etc/harmonia/config.toml";
                     }
                   ];
                   ports = [
@@ -108,46 +81,44 @@ in
                   ];
                   volumeMounts = [
                     {
-                      name = "nix-config";
-                      mountPath = "/etc/nix";
-                    }
-                    {
-                      name = "nix-cache";
+                      name = "nix-csi";
                       mountPath = "/nix";
                     }
                     {
-                      name = "nix-serve";
-                      mountPath = "/etc/nix-serve";
+                      name = "nix-cache";
+                      mountPath = "/content";
+                    }
+                    {
+                      name = "nix-config";
+                      mountPath = "/etc/nix";
                     }
                     {
                       name = "sshd";
                       mountPath = "/etc/ssh-mount";
                     }
+                    {
+                      name = "harmonia-config";
+                      mountPath = "/etc/harmonia";
+                    }
+                    {
+                      name = "harmonia-secret";
+                      mountPath = "/var/run/secrets/harmonia";
+                    }
                   ];
-                }
-              ];
-              volumes = [
-                {
-                  name = "nix-config";
-                  configMap.name = "nix-config";
-                }
-                {
-                  name = "nix-serve";
-                  secret.secretName = "nix-serve";
-                }
-                {
-                  name = "sshd";
-                  secret.secretName = "sshd";
-                }
-                {
-                  name = "nix-csi";
-                  csi = {
-                    driver = "nix.csi.store";
-                    readOnly = false;
-                    volumeAttributes.expression = builtins.readFile ../guests/cache.nix;
-                  };
-                }
-              ];
+                };
+              };
+              volumes = {
+                _namedlist = true;
+                nix-config.configMap.name = "nix-config";
+                harmonia-secret.secret.secretName = "harmonia";
+                harmonia-config.configMap.name = "harmonia";
+                sshd.secret.secretName = "sshd";
+                nix-csi.csi = {
+                  driver = "nix.csi.store";
+                  readOnly = false;
+                  volumeAttributes.expression = builtins.readFile ../guests/cache.nix;
+                };
+              };
             };
           };
           volumeClaimTemplates = [
@@ -189,6 +160,11 @@ in
               port = 22;
               targetPort = 22;
               name = "ssh";
+            }
+            {
+              port = 80;
+              targetPort = 80;
+              name = "http";
             }
           ];
           type = "LoadBalancer";

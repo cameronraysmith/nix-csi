@@ -91,7 +91,7 @@ let
               discriminator = "nix-csi";
               pushManifest = {
                 enable = true;
-                to = "ssh://root@192.168.88.20";
+                to = "ssh://root@192.168.88.21";
                 failCachePush = false;
               };
             };
