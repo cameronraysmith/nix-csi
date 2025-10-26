@@ -79,7 +79,7 @@ let
               namespace = "nix-csi";
               image = imageRef;
               cache = {
-                enable = false;
+                enable = true;
                 storageClassName = "local-path";
               };
               ctest = {

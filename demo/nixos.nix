@@ -83,20 +83,6 @@ let
                   pkgs.fish
                   pkgs.bash
                   nixos.config.system.build.toplevel
-                  # (pkgs.writeScriptBin "init" # bash
-                  #   ''
-                  #     #! ${pkgs.runtimeShell}
-                  #     export PATH=${
-                  #       lib.makeBinPath [
-                  #         pkgs.coreutils
-                  #         pkgs.util-linuxMinimal
-                  #       ]
-                  #     }:$PATH
-                  #     set -x
-                  #     export container=1
-                  #     source ${nixos.config.system.build.toplevel}/init
-                  #   ''
-                  # )
                 ];
               };
             };

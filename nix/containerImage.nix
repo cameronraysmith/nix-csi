@@ -8,7 +8,6 @@
 }:
 let
   lib = pkgs.lib;
-
   build =
     pkgs.writeScriptBin "build" # bash
       ''
@@ -19,19 +18,14 @@ let
         rsync --archive ${pkgs.dockerTools.caCertificates}/ /
         rsync --archive ${pkgs.dockerTools.fakeNss}/ /
         rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
-        source /buildscript/run
+        source /scripts/build
       '';
-
   dinixEval = import dinix {
     inherit pkgs;
     modules = [
       {
         config = {
-          # services.boot.depends-on = [ "nix-csi" ];
-          services.boot.waits-for = [
-            "nix-csi"
-            "nix-daemon"
-          ];
+          services.boot.depends-on = [ "nix-csi" ];
           services.nix-csi = {
             command = "${lib.getExe pkgs.nix-csi} --loglevel DEBUG";
             options = [ "shares-console" ];
@@ -47,7 +41,11 @@ let
           };
           services.gc = {
             type = "scripted";
-            command = "${lib.getExe pkgs.lix} store gc";
+            command = pkgs.writeScriptBin "gc" # bash
+            ''
+              nix build --out-link /nix/var/result /nix/var/result
+              nix store gc
+            '';
             options = [ "shares-console" ];
             depends-on = [
               "nix-daemon"
@@ -89,7 +87,6 @@ let
       }
     ];
   };
-
   initcopy =
     pkgs.writeScriptBin "initcopy" # bash
       ''
@@ -103,17 +100,18 @@ let
         }:$PATH
         rsync --archive ${pkgs.dockerTools.fakeNss}/ /
         nix copy --store local --to /nix-volume --no-check-sigs $(nix path-info --store local --all)
-        nix build --store /nix-volume --out-link /nix-volume/nix/var/result ${rootEnv}
+        nix build --store /nix-volume --out-link /nix-volume/nix/var/result ${pathEnv}
       '';
-
-  rootEnv = pkgs.buildEnv {
+  pathEnv = pkgs.buildEnv {
     name = "rootEnv";
     paths = with pkgs; [
       dinixEval.config.containerWrapper
-      fishMinimal
-      coreutils
-      lix
+      bash # Used for build and upload scripts
       build
+      coreutils
+      fishMinimal
+      lix
+      openssh
       util-linuxMinimal
     ];
   };
@@ -122,17 +120,14 @@ nix2container.buildImage {
   name = "nix-csi";
   initializeNixDatabase = true;
   maxLayers = 120;
-  config = {
-    Entrypoint = [ (lib.getExe dinixEval.config.containerWrapper) ];
-    Env = [
-      "PATH=${
-        lib.makeBinPath [
-          initcopy
-          rootEnv
-        ]
-      }"
-    ];
-  };
+  config.Env = [
+    "PATH=${
+      lib.makeBinPath [
+        initcopy
+        pathEnv
+      ]
+    }"
+  ];
   # So we can peek into eval
   meta.dinixEval = dinixEval;
 }

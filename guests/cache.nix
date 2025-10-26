@@ -16,7 +16,6 @@ let
       ''nix:x:1000:''
     ];
   };
-
   dinixEval = dinix {
     inherit pkgs;
     modules = [
@@ -35,7 +34,7 @@ let
             depends-on = [ "setup" ];
           };
           services.nix-daemon = {
-            command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store /content";
+            command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store local";
             depends-on = [ "setup" ];
           };
           services.harmonia = {
@@ -65,11 +64,9 @@ let
                   rsync --archive ${pkgs.dockerTools.caCertificates}/ /
                   rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
                   # Tricking OpenSSH's security policies
-                  rsync --archive --copy-links --chmod=600 /etc/ssh-mount/ /etc/ssh/
+                  rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/ssh-mount/ /etc/ssh/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
                   chown -R nix:nix /home/nix
-                  # Init content store
-                  nix store ping --store /content
                 ''
             );
           };
@@ -77,26 +74,36 @@ let
       }
     ];
   };
-  dinitWrapper =
-    pkgs.writeScriptBin "dinit" # bash
+  initcopy =
+    pkgs.writeScriptBin "initcopy" # bash
       ''
         #! ${pkgs.runtimeShell}
-        ${lib.getExe pkgs.rsync} --archive ${fakeNss}/ /
-        exec ${dinixEval.config.containerWrapper}/bin/dinit
+        set -euo pipefail
+        export PATH=${
+          lib.makeBinPath [
+            pkgs.rsync
+            pkgs.lix
+          ]
+        }:$PATH
+        rsync --archive ${pkgs.dockerTools.fakeNss}/ /
+        nix copy --store local --to /nix-volume --no-check-sigs $(nix path-info --store local --all)
+        nix build --store /nix-volume --out-link /nix-volume/nix/var/result /nix/var/result
       '';
+  pathEnv = pkgs.buildEnv {
+    name = "pathEnv";
+    paths = with pkgs; [
+      dinixEval.config.containerWrapper
+      initcopy
+      rsync
+      coreutils
+      fishMinimal
+      gitMinimal
+      lix
+      ncdu
+      openssh
+      curl
+      sqlite
+    ];
+  };
 in
-pkgs.buildEnv {
-  name = "binary-cache-env";
-  paths = with pkgs; [
-    rsync
-    coreutils
-    fishMinimal
-    gitMinimal
-    lix
-    ncdu
-    openssh
-    curl
-    sqlite
-    dinitWrapper
-  ];
-}
+pathEnv

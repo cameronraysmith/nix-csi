@@ -1,14 +1,19 @@
-{ config, lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 let
   cfg = config.nix-csi;
 in
 {
   config = lib.mkIf cfg.enable {
     kubernetes.resources.${cfg.namespace} = {
-      ConfigMap.nix-buildscript.data = {
-        "run" = # bash
+      ConfigMap.nix-scripts.data = {
+        "build" = # bash
           ''
-            #! /usr/bin/env bash
+            #! ${pkgs.runtimeShell}
             set -euo pipefail
             set -x
             nix build \
@@ -17,6 +22,18 @@ in
               --print-out-paths \
               --file \
               /buildinfo
+          '';
+        "upload" = # bash
+          ''
+            #! ${pkgs.runtimeShell}
+            set -euo pipefail
+            set -x
+            export NIX_SSHOPTS="-i $HOME/.ssh/id_ed25519"
+            namespace=${cfg.namespace}
+
+            nix copy \
+              --to ssh://nix-cache.$namespace.svc \
+              $@
           '';
       };
       ConfigMap.nix-config.data = {

@@ -41,12 +41,10 @@ in
       };
       Secret.harmonia.stringData.sign_key = builtins.readFile ../cache-secret;
       ConfigMap.harmonia.data."config.toml" = # TOML
-      ''
-        bind = "[::]:80"
-        virtual_nix_store = "/nix/store"
-        real_nix_store = "/content/nix/store"
-        sign_key_paths = [ "/var/run/secrets/harmonia/sign_key" ]
-      '';
+        ''
+          bind = "[::]:80"
+          sign_key_paths = [ "/var/run/secrets/harmonia/sign_key" ]
+        '';
 
       StatefulSet.nix-cache = {
         spec = {
@@ -55,12 +53,29 @@ in
           selector.matchLabels.app = "nix-cache";
           template = {
             metadata.labels.app = "nix-cache";
-            metadata.annotations.harmoniaHash = builtins.hashString "md5" (builtins.toJSON config.kubernetes.resources.${cfg.namespace}.ConfigMap.harmonia);
-            metadata.annotations.sshHash = builtins.hashString "md5" (builtins.toJSON config.kubernetes.resources.${cfg.namespace}.Secret.sshd);
+            metadata.annotations.harmoniaHash = builtins.hashString "md5" (
+              builtins.toJSON config.kubernetes.resources.${cfg.namespace}.ConfigMap.harmonia
+            );
+            metadata.annotations.sshHash = builtins.hashString "md5" (
+              builtins.toJSON config.kubernetes.resources.${cfg.namespace}.Secret.sshd
+            );
             spec = {
+              initContainers = [
+                {
+                  name = "initcopy";
+                  image = "quay.io/nix-csi/scratch:1.0.1";
+                  command = [ "initcopy" ];
+                  volumeMounts = {
+                    _namedlist = true;
+                    nix-csi.mountPath = "/nix";
+                    nix-store.mountPath = "/nix-volume";
+                    nix-config.mountPath = "/etc/nix";
+                  };
+                }
+              ];
               containers = {
                 _namedlist = true;
-                nix-serve = {
+                harmonia = {
                   command = [ "dinit" ];
                   image = "quay.io/nix-csi/scratch:1.0.1";
                   env = [
@@ -81,12 +96,9 @@ in
                   ];
                   volumeMounts = [
                     {
-                      name = "nix-csi";
+                      name = "nix-store";
                       mountPath = "/nix";
-                    }
-                    {
-                      name = "nix-cache";
-                      mountPath = "/content";
+                      subPath = "nix";
                     }
                     {
                       name = "nix-config";
@@ -123,7 +135,7 @@ in
           };
           volumeClaimTemplates = [
             {
-              metadata.name = "nix-cache";
+              metadata.name = "nix-store";
               spec = {
                 accessModes = [ "ReadWriteOnce" ];
                 resources.requests.storage = "10Gi";

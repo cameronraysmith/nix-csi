@@ -1,6 +1,8 @@
 { config, lib, ... }:
 let
   cfg = config.nix-csi;
+  nsRes = config.kubernetes.resources.${cfg.namespace};
+  hashAttrs = attrs: builtins.hashString "md5" (builtins.toJSON attrs);
 in
 {
   config = lib.mkIf cfg.enable {
@@ -32,9 +34,8 @@ in
           template = {
             metadata.labels.app = "nix-csi-node";
             metadata.annotations."kubectl.kubernetes.io/default-container" = "nix-csi-node";
-            metadata.annotations.configHash = builtins.hashString "md5" (
-              builtins.toJSON config.kubernetes.resources.${cfg.namespace}.ConfigMap.nix-config
-            );
+            metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-config;
+            metadata.annotations.scriptsHash = hashAttrs nsRes.ConfigMap.nix-scripts;
             spec = {
               serviceAccountName = "nix-csi";
               initContainers = [
@@ -44,7 +45,7 @@ in
                   command = [ "initcopy" ];
                   volumeMounts = {
                     _namedlist = true;
-                    init.mountPath = "/nix-volume";
+                    nix-store.mountPath = "/nix-volume";
                     nix-config.mountPath = "/etc/nix";
                   };
                 }
@@ -52,7 +53,9 @@ in
               containers = {
                 _namedlist = true;
                 nix-csi-node = {
-                  image = cfg.image;
+                  # image = cfg.image;
+                  image = "quay.io/nix-csi/scratch:1.0.1";
+                  command = [ "dinit" ];
                   securityContext.privileged = true;
                   env = {
                     _namedlist = true;
@@ -68,19 +71,20 @@ in
                     _namedlist = true;
                     csi-socket.mountPath = "/csi";
                     nix-config.mountPath = "/etc/nix";
+                    nix-scripts.mountPath = "/scripts";
                     registration.mountPath = "/registration";
                     kubelet = {
                       mountPath = "/var/lib/kubelet";
                       mountPropagation = "Bidirectional";
                     };
-                    runtime = {
+                    nix-store = {
                       mountPath = "/nix";
                       mountPropagation = "Bidirectional";
+                      subPath = "nix";
                     };
                   }
                   // (lib.optionalAttrs cfg.cache.enable {
-                    name = "sshc";
-                    mountPath = "/etc/sshc";
+                    sshc.mountPath = "/etc/sshc";
                   });
                 };
                 csi-node-driver-registrar = {
@@ -115,12 +119,14 @@ in
               };
               volumes = {
                 _namedlist = true;
-                init.hostPath = {
-                  path = cfg.hostMountPath;
-                  type = "DirectoryOrCreate";
+                nix-config.configMap.name = "nix-config";
+                registration.hostPath.path = "/var/lib/kubelet/plugins_registry";
+                nix-scripts.configMap = {
+                  name = "nix-scripts";
+                  defaultMode = 493; # 755
                 };
-                runtime.hostPath = {
-                  path = "${cfg.hostMountPath}/nix";
+                nix-store.hostPath = {
+                  path = cfg.hostMountPath;
                   type = "DirectoryOrCreate";
                 };
                 csi-socket.hostPath = {
@@ -131,12 +137,9 @@ in
                   path = "/var/lib/kubelet";
                   type = "Directory";
                 };
-                registration.hostPath.path = "/var/lib/kubelet/plugins_registry";
-                nix-config.configMap.name = "nix-config";
               }
               // (lib.optionalAttrs cfg.cache.enable {
-                name = "sshc";
-                secret.secretName = "sshc";
+                sshc.secret.secretName = "sshc";
               });
             };
           };

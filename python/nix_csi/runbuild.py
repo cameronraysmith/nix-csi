@@ -27,18 +27,15 @@ async def run(storePath: str, expression: str):
                     "template": {
                         "spec": {
                             "suspend": True,
+                            "restartPolicy": "Never",
                             "containers": [
                                 {
                                     "name": "build",
-                                    "image": "quay.io/nix-csi/scratch:1.0.0",
+                                    "image": "quay.io/nix-csi/scratch:1.0.1",
                                     "command": [
                                         "build",
                                     ],
                                     "env": [
-                                        {
-                                            "name": "PATH",
-                                            "value": "/nix/var/result/bin",
-                                        },
                                         {
                                             "name": "HOME",
                                             "value": "/nix/var/nix-csi/home",
@@ -67,13 +64,12 @@ async def run(storePath: str, expression: str):
                                             "mountPath": "/buildinfo",
                                         },
                                         {
-                                            "name": "nix-buildscript",
-                                            "mountPath": "/buildscript",
+                                            "name": "nix-scripts",
+                                            "mountPath": "/scripts",
                                         },
                                     ],
                                 },
                             ],
-                            "restartPolicy": "Never",
                             "volumes": [
                                 {
                                     "name": "nix-store",
@@ -87,8 +83,11 @@ async def run(storePath: str, expression: str):
                                     "configMap": {"name": "nix-config"},
                                 },
                                 {
-                                    "name": "nix-buildscript",
-                                    "configMap": {"name": "nix-buildscript"},
+                                    "name": "nix-scripts",
+                                    "configMap": {
+                                        "name": "nix-scripts",
+                                        "defaultMode": 493,
+                                    },
                                 },
                                 {
                                     "name": "nix-buildinfo",
