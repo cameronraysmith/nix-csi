@@ -4,27 +4,31 @@
 }:
 let
   lib = pkgs.lib;
-  fakeNss = pkgs.dockerTools.fakeNss.override {
-    extraPasswdLines = [
-      # passwd
-      ''sshd:x:993:992:SSH privilege separation user:/var/empty:/bin/sh''
-      # passwd
-      ''nix:x:1000:1000:Nix binary cache user:/home/nix:/bin/sh''
-    ];
-    extraGroupLines = [
-      # groups
-      ''nix:x:1000:''
-    ];
-  };
   dinixEval = dinix {
     inherit pkgs;
     modules = [
       {
         config = {
+          users = {
+            enable = true;
+            users.nix = {
+              uid = 1000;
+              gid = 1000;
+              comment = "Nix binary cache user";
+            };
+            groups.nix.gid = 1000;
+            users.sshd = {
+              uid = 993;
+              gid = 992;
+              comment = "SSH privilege separation user";
+            };
+            groups.sshd.gid = 992;
+          };
           services.boot = {
             depends-on = [
               "openssh"
               "nix-daemon"
+              "harmonia"
             ];
           };
           services.openssh = {
@@ -35,13 +39,15 @@ let
           };
           services.nix-daemon = {
             command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store local";
-            depends-on = [ "setup" ];
+            depends-on = [
+              "setup"
+            ];
           };
           services.harmonia = {
             type = "process";
             command = "${lib.getExe pkgs.harmonia}";
             options = [ "shares-console" ];
-            run-as = "nobody";
+            run-as = "root";
             depends-on = [
               "setup"
               "nix-daemon"
@@ -59,7 +65,6 @@ let
                   mkdir --parents /home/nix
                   # Stuff requred for $most things
                   mkdir --parents /run
-                  rsync --archive ${fakeNss}/ /
                   rsync --archive ${pkgs.dockerTools.binSh}/ /
                   rsync --archive ${pkgs.dockerTools.caCertificates}/ /
                   rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
@@ -85,7 +90,6 @@ let
             pkgs.lix
           ]
         }:$PATH
-        rsync --archive ${pkgs.dockerTools.fakeNss}/ /
         nix copy --store local --to /nix-volume --no-check-sigs $(nix path-info --store local --all)
         nix build --store /nix-volume --out-link /nix-volume/nix/var/result /nix/var/result
       '';
