@@ -68,7 +68,7 @@ let
                   rsync --archive --copy-links --chmod=600 /etc/ssh-mount/ /etc/ssh/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
                   chown -R nix:nix /home/nix
-                  # Init nix2 store
+                  # Init content store
                   nix store ping --store /content
                 ''
             );
@@ -81,7 +81,7 @@ let
     pkgs.writeScriptBin "dinit" # bash
       ''
         #! ${pkgs.runtimeShell}
-        rsync --archive ${fakeNss}/ /
+        ${lib.getExe pkgs.rsync} --archive ${fakeNss}/ /
         exec ${dinixEval.config.containerWrapper}/bin/dinit
       '';
 in

@@ -79,7 +79,7 @@ let
               namespace = "nix-csi";
               image = imageRef;
               cache = {
-                enable = true;
+                enable = false;
                 storageClassName = "local-path";
               };
               ctest = {
@@ -100,15 +100,13 @@ let
       ];
     };
 
-    # dinix evaluation for daemonset
-    dinixEval = import ./nix/dsImage/dinixEval.nix {
-      inherit pkgs dinix;
-    };
     # script to build daemonset image
-    image = import ./nix/dsImage {
+    image = import ./nix/containerImage.nix{
       inherit pkgs dinix;
       inherit (n2c) nix2container;
     };
+    inherit (image.passthru) dinixEval;
+
     imageToContainerd = copyToContainerd image;
     imageRef = "quay.io/nix-csi/${image.imageRefUnsafe}";
 

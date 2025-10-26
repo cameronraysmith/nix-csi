@@ -9,7 +9,6 @@ import time
 import math
 
 from csi import csi_grpc, csi_pb2
-from google.protobuf.wrappers_pb2 import BoolValue
 from grpclib.const import Status
 from grpclib.exceptions import GRPCError
 from grpclib.server import Server
@@ -29,10 +28,12 @@ CSI_VENDOR_VERSION = metadata.version("nix-csi")
 
 MOUNT_ALREADY_MOUNTED = 32
 
-# Paths we base everything on. Remember that these are CSI pod paths not node paths.
-CSI_ROOT = Path("/nix/var/nix-csi")
+# Paths we base everything on.
+# Remember that these are CSI pod paths not node paths.
+NIX_ROOT = Path("/")
+CSI_ROOT = NIX_ROOT / "nix/var/nix-csi"
 CSI_VOLUMES = CSI_ROOT / "volumes"
-CSI_GCROOTS = Path("/nix/var/nix/gcroots/nix-csi")
+CSI_GCROOTS = NIX_ROOT / "nix/var/nix/gcroots/nix-csi"
 NAMESPACE = os.environ["KUBE_NAMESPACE"]
 
 RSYNC_CONCURRENCY = Semaphore(1)
@@ -64,6 +65,7 @@ def reboot_cleanup():
     """Cleanup volume trees and gcroots if we have rebooted"""
     stat_file = Path("/proc/stat")
     state_file = CSI_ROOT / "proc_stat"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
 
     needs_cleanup = False
     if state_file.exists():
@@ -152,29 +154,34 @@ def log_request(method_name: str, request: Any):
 
 
 async def set_nix_path():
-    NIX_PATH_PATH = CSI_ROOT / "NIX_PATH"
+    NIX_PATH_LINK = CSI_ROOT / "NIX_PATH"
+    NIX_PATH_LINK.parent.mkdir(parents=True, exist_ok=True)
     build = await run_console(
         "nix",
         "build",
+        "--print-out-paths",
         "--file",
         "/etc/nix/nix-path.nix",
         "--out-link",
-        NIX_PATH_PATH,
+        NIX_PATH_LINK,
     )
     if build.returncode != 0:
         raise GRPCError(
             Status.INVALID_ARGUMENT,
             f"nix build (NIX_PATH) failed: {build.returncode=}",
         )
-    os.environ["NIX_PATH"] = NIX_PATH_PATH.read_text().strip()
+
+    os.environ["NIX_PATH"] = NIX_PATH_LINK.read_text().strip()
 
 
 class NodeServicer(csi_grpc.NodeBase):
-    # If you get evictions from cache size you are elite
-    packagePathCache: TTLCache[str, Path] = TTLCache(1337, 60)
-    pathInfoCache: TTLCache[Path, List[str]] = TTLCache(1337, 60)
+    # Cache positive Nix commands
+    packagePathCache: TTLCache[str, Path] = TTLCache(math.inf, 60)
+    pathInfoCache: TTLCache[Path, List[str]] = TTLCache(math.inf, 60)
     copyPathsCache: TTLCache[str, None] = TTLCache(math.inf, 60)
+    # Locks that prevents the same expression to be processed in parallel
     expressionLock: defaultdict[str, Semaphore] = defaultdict(Semaphore)
+    # Locks that prevent the same derivation to be uploaded in parallel
     copyLock: defaultdict[str, Semaphore] = defaultdict(Semaphore)
 
     async def NodePublishVolume(self, stream):
@@ -183,14 +190,17 @@ class NodeServicer(csi_grpc.NodeBase):
             raise ValueError("NodePublishVolumeRequest is None")
 
         # TODO: Only do this on startup-ish
-        system = (await run_captured("nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem")).stdout
+        system = (
+            await run_captured(
+                "nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem"
+            )
+        ).stdout
 
         targetPath = Path(request.target_path)
         expression = request.volume_context.get("expression")
         storePath = request.volume_context.get(system)
         packagePath: Path = Path("/nonexistent/path/that/should/never/exist")
         gcPath = CSI_GCROOTS / request.volume_id
-
 
         if storePath is not None:
             packagePathCacheResult = self.packagePathCache.get(storePath)
@@ -226,6 +236,7 @@ class NodeServicer(csi_grpc.NodeBase):
                         )
                 packagePath = Path(build.stdout.splitlines()[0])
                 self.packagePathCache[storePath] = packagePath
+
         elif expression is not None:
             async with self.expressionLock[expression]:
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".nix") as f:
@@ -257,7 +268,7 @@ class NodeServicer(csi_grpc.NodeBase):
                             )
                         packagePath = Path(eval.stdout)
                         self.packagePathCache[expression] = packagePath
-                        logger.debug("Package path after eval, already exists")
+                        logger.debug("Package path from eval")
 
                     # Spawn a Job to build the expression
                     if not packagePath.exists():

@@ -27,7 +27,7 @@
     hostMountPath = lib.mkOption {
       description = "Where on the host to put cknix store";
       type = lib.types.path;
-      default = "/var/lib/nix-csi/nix";
+      default = "/var/lib/nix-csi";
     };
   };
 }
