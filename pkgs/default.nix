@@ -20,8 +20,7 @@ self: pkgs: {
   nix-csi = pkgs.python3Packages.callPackage ../python {
     inherit (self) csi-proto-python kr8s;
   };
-  asyncache = pkgs.python3Packages.callPackage ./asyncache.nix { };
   python-jsonpath = pkgs.python3Packages.callPackage ./python-jsonpath.nix { };
-  kr8s = pkgs.python3Packages.callPackage ./kr8s.nix { inherit (self) asyncache python-jsonpath; };
+  kr8s = pkgs.python3Packages.callPackage ./kr8s.nix { inherit (self) python-jsonpath; };
 
 }

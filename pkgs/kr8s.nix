@@ -3,7 +3,7 @@
   buildPythonPackage,
   fetchFromGitHub,
   # dependencies
-  asyncache,
+  cachetools,
   cryptography,
   exceptiongroup,
   packaging,
@@ -13,21 +13,20 @@
   httpx,
   httpx-ws,
   python-box,
-  typing-extensions,
   # build-system
   hatchling,
   hatch-vcs,
 }:
 buildPythonPackage rec {
   pname = "kr8s";
-  version = "0.20.10";
+  version = "0.20.12";
   pyproject = true;
 
   src = fetchFromGitHub {
     owner = "kr8s-org";
     repo = "kr8s";
     tag = "v${version}";
-    hash = "sha256-NiCasvS4P9zEh8JUvFAFJBtLfwOaz9jmr17IkeQDjXQ=";
+    hash = "sha256-KhbJfk2hfqA2mNoTkKwFC6kPrqwzpvYCUIlMWsUOcEU=";
   };
 
   build-system = [
@@ -36,7 +35,7 @@ buildPythonPackage rec {
   ];
 
   dependencies = [
-    asyncache
+    cachetools
     cryptography
     exceptiongroup
     packaging
@@ -46,7 +45,6 @@ buildPythonPackage rec {
     httpx
     httpx-ws
     python-box
-    typing-extensions
   ];
 
   nativeCheckInputs = [ ];
