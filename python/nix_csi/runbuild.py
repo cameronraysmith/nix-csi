@@ -9,7 +9,7 @@ NAMESPACE = os.environ.get("KUBE_NAMESPACE", "default")
 KUBE_NODE_NAME = os.environ.get("KUBE_NODE_NAME", "shitbox")
 
 
-async def run(storePath: str, expression: str):
+async def runJobBuild(storePath: str, expression: str):
     jobName = f"build-{os.path.basename(storePath)[:32]}"
     job: Job | None = None
 

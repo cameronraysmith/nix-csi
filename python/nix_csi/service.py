@@ -1,13 +1,10 @@
 import asyncio
 import logging
 import os
-import shlex
 import shutil
 import socket
 import tempfile
-import time
 import math
-import textwrap
 
 from csi import csi_grpc, csi_pb2
 from grpclib.const import Status
@@ -15,12 +12,16 @@ from grpclib.exceptions import GRPCError
 from grpclib.server import Server
 from importlib import metadata
 from pathlib import Path
-from typing import Any, NamedTuple, Optional, List
+from typing import List
 from cachetools import TTLCache
-from asyncio import Semaphore
+from asyncio import Semaphore, sleep
 from collections import defaultdict
-from . import runbuild
-from . import IdentityServicer
+from tenacity import AsyncRetrying, RetryError, stop_after_attempt
+from .runbuild import runJobBuild
+from .identityservicer import IdentityServicer
+from .copytocache import copyToCache
+from .subprocessing import run_captured, run_console, try_captured, try_console
+from .errorhandling import NixCsiError
 
 logger = logging.getLogger("nix-csi")
 
@@ -38,20 +39,6 @@ CSI_GCROOTS = NIX_ROOT / "nix/var/nix/gcroots/nix-csi"
 NAMESPACE = os.environ["KUBE_NAMESPACE"]
 
 RSYNC_CONCURRENCY = Semaphore(1)
-
-
-class NixCsiError(GRPCError):
-    def __init__(
-        self,
-        status: Status,
-        message: Optional[str] = None,
-        details: Any = None,
-    ) -> None:
-        logger.error(message)
-        super().__init__(status, message, details)
-        self.status = status
-        self.message = message
-        self.details = details
 
 
 def get_kernel_boot_time(stat_file: Path = Path("/proc/stat")) -> int:
@@ -88,92 +75,6 @@ def reboot_cleanup():
                 path.mkdir(parents=True, exist_ok=True)
 
 
-def log_command(*args, log_level: int):
-    logger.log(
-        log_level,
-        f"Running command: {shlex.join([str(arg) for arg in args])}",
-    )
-
-
-class SubprocessResult(NamedTuple):
-    returncode: int
-    stdout: str
-    stderr: str
-    combined: str
-    elapsed: float
-
-
-async def try_captured(*args):
-    result = await run_console(*args)
-    if result.returncode != 0:
-        raise NixCsiError(
-            Status.INTERNAL,
-            f"{shlex.join([str(arg) for arg in args[:5]])}... failed: {result.returncode=} {result.combined=}",
-        )
-    return result
-
-
-async def try_console(*args, log_level: int = logging.DEBUG):
-    result = await run_console(*args, log_level=log_level)
-    if result.returncode != 0:
-        raise NixCsiError(
-            Status.INTERNAL,
-            f"{shlex.join([str(arg) for arg in args[:5]])}... failed: {result.returncode=}",
-        )
-    return result
-
-
-# Run async subprocess, capture output and returncode
-async def run_captured(*args):
-    return await run_console(*args, log_level=logging.NOTSET)
-
-
-# Run async subprocess, forward output to console and return returncode
-async def run_console(*args, log_level: int = logging.DEBUG):
-    start_time = time.perf_counter()
-    log_command(*args, log_level=log_level)
-    proc = await asyncio.create_subprocess_exec(
-        *[str(arg) for arg in args],
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
-    stdout_data = []
-    stderr_data = []
-    combined_data = []
-
-    async def stream_output(stream, buffer):
-        async for line in stream:
-            decoded = line.decode().strip()
-            buffer.append(decoded)
-            combined_data.append(decoded)
-            logger.log(log_level, decoded)
-
-    await asyncio.gather(
-        stream_output(proc.stdout, stdout_data),
-        stream_output(proc.stderr, stderr_data),
-        proc.wait(),
-    )
-    elapsed_time = time.perf_counter() - start_time
-    if elapsed_time > 5:
-        logger.info(
-            f"Comamnd executed in {elapsed_time} seconds: {shlex.join([str(arg) for arg in args[:5]])}"
-        )
-
-    assert proc.returncode is not None
-    return SubprocessResult(
-        proc.returncode,
-        "\n".join(stdout_data).strip(),
-        "\n".join(stderr_data).strip(),
-        "\n".join(combined_data).strip(),
-        elapsed_time,
-    )
-
-
-def log_request(method_name: str, request: Any):
-    logger.info("Received %s:\n%s", method_name, request)
-
-
 async def set_nix_path():
     NIX_PATH_LINK = CSI_ROOT / "NIX_PATH"
     NIX_PATH_LINK.parent.mkdir(parents=True, exist_ok=True)
@@ -190,37 +91,56 @@ async def set_nix_path():
 
 
 class NodeServicer(csi_grpc.NodeBase):
+    initialized = False
+    system = "x86_64-linux"
     # Cache positive Nix commands
     packagePathCache: TTLCache[str, Path] = TTLCache(math.inf, 60)
     pathInfoCache: TTLCache[Path, List[str]] = TTLCache(math.inf, 60)
-    copyPathsCache: TTLCache[str, None] = TTLCache(math.inf, 60)
     # Locks that prevents the same expression to be processed in parallel
     expressionLock: defaultdict[str, Semaphore] = defaultdict(Semaphore)
-    # Locks that prevent the same derivation to be uploaded in parallel
-    copyLock: defaultdict[Path, Semaphore] = defaultdict(Semaphore)
+
+    async def initialize(self):
+        logger.info("Initializing NodeServicer")
+        # Clean old volumes on startup
+        reboot_cleanup()
+        # Create directories we operate in
+        CSI_ROOT.mkdir(parents=True, exist_ok=True)
+        CSI_VOLUMES.mkdir(parents=True, exist_ok=True)
+        CSI_GCROOTS.mkdir(parents=True, exist_ok=True)
+        await set_nix_path()
+        self.system = (
+            await try_captured(
+                "nix",
+                "eval",
+                "--raw",
+                "--impure",
+                "--expr",
+                "builtins.currentSystem",
+            )
+        ).stdout
+        logger.info("Initialized NodeServicer")
+        self.initialized = True
 
     async def NodePublishVolume(self, stream):
         request: csi_pb2.NodePublishVolumeRequest | None = await stream.recv_message()
         if request is None:
             raise ValueError("NodePublishVolumeRequest is None")
 
-        # TODO: Only do this on startup
-        system = (
-            await try_captured(
-                "nix",
-                "eval",
-                "--store",
-                "dummy--raw",
-                "--impure",
-                "--expr",
-                "builtins.currentSystem",
+        try:
+            async for attempt in AsyncRetrying(stop=stop_after_attempt(120)):
+                with attempt:
+                    if not self.initialized:
+                        await sleep(1)
+                        raise Exception("NodeServicer not initialized")
+        except RetryError:
+            raise NixCsiError(
+                Status.INTERNAL, "NodeServicer not initialized after 120 seconds"
             )
-        ).stdout
 
         targetPath = Path(request.target_path)
         expression = request.volume_context.get("expression")
         buildInCSI = request.volume_context.get("buildInCSI", False)
-        storePath = request.volume_context.get(system)
+        storePath = request.volume_context.get(self.system)
         packagePath: Path = Path("/nonexistent/path/that/should/never/exist")
         gcPath = CSI_GCROOTS / request.volume_id
 
@@ -229,14 +149,14 @@ class NodeServicer(csi_grpc.NodeBase):
             if packagePathCacheResult is not None and packagePathCacheResult.exists():
                 packagePath = packagePathCacheResult
             else:
+                packagePath = Path(storePath)
                 logger.debug(f"{storePath=}")
                 buildCommand = [
                     "nix",
                     "build",
-                    "--print-out-paths",
                     "--out-link",
                     gcPath,
-                    storePath,
+                    packagePath,
                 ]
 
                 # Fetch storePath from caches
@@ -256,8 +176,8 @@ class NodeServicer(csi_grpc.NodeBase):
                             Status.INVALID_ARGUMENT,
                             f"nix build (expression) failed: {build.returncode=} {build.stderr=}",
                         )
-                packagePath = Path(build.stdout.splitlines()[0])
-                self.packagePathCache[storePath] = packagePath
+                if packagePath.exists():
+                    self.packagePathCache[storePath] = packagePath
 
         elif expression is not None:
             async with self.expressionLock[expression]:
@@ -272,7 +192,6 @@ class NodeServicer(csi_grpc.NodeBase):
                         and packagePathCacheResult.exists()
                     ):
                         packagePath = packagePathCacheResult
-                        logger.debug("Package path from cache")
                     else:
                         # eval expression to get storePath
                         eval = await try_captured(
@@ -281,26 +200,25 @@ class NodeServicer(csi_grpc.NodeBase):
                             "--raw",
                             "--impure",
                             "--expr",
-                            f"import {expressionFile} {{}}",
+                            f"(import {expressionFile} {{}}).outPath",
                         )
                         packagePath = Path(eval.stdout)
                         self.packagePathCache[expression] = packagePath
-                        logger.debug("Package path from eval")
+                        # Try fetching from cache
+                        await run_captured("nix", "build", packagePath)
 
                     # Spawn a Job to build the expression
                     if not packagePath.exists() and not buildInCSI:
-                        jobResult = await runbuild.run(str(packagePath), expression)
+                        jobResult = await runJobBuild(str(packagePath), expression)
                         if jobResult[0]:
-                            buildResult = await try_captured("nix", "build", storePath)
-                            packagePath = Path(buildResult.stdout.splitlines()[0])
+                            # Try fetching from cache
+                            await try_captured("nix", "build", packagePath)
                             self.packagePathCache[expression] = packagePath
-                            logger.debug("Package path from job and build")
 
                     if not packagePath.exists() and buildInCSI:
                         buildCommand = [
                             "nix",
                             "build",
-                            "--print-out-paths",
                             "--out-link",
                             gcPath,
                             "--file",
@@ -326,9 +244,8 @@ class NodeServicer(csi_grpc.NodeBase):
                                     f"nix build (expression) failed: {build.returncode=} {build.stderr=}",
                                 )
 
-                        packagePath = Path(build.stdout.splitlines()[0])
-                        self.packagePathCache[expression] = packagePath
-                        logger.debug("Package path from local build")
+                        if packagePath.exists():
+                            self.packagePathCache[expression] = packagePath
         else:
             raise NixCsiError(
                 Status.INVALID_ARGUMENT,
@@ -354,7 +271,6 @@ class NodeServicer(csi_grpc.NodeBase):
         pathInfoCacheResult = self.pathInfoCache.get(packagePath)
         if pathInfoCacheResult is not None:
             paths = pathInfoCacheResult
-            logger.debug("Package closure from cache")
         else:
             pathInfo = await try_captured(
                 "nix",
@@ -364,13 +280,14 @@ class NodeServicer(csi_grpc.NodeBase):
             )
             paths = pathInfo.stdout.splitlines()
             self.pathInfoCache[packagePath] = paths
-            logger.debug("Package closure path-info")
 
         try:
+            # This try block is essentially nix copy into a chroot store with
+            # extra steps. (Hardlinking instead of dumbcopying)
+
             # Install CSI gcroots
-            await try_captured(
-                "nix", "build", "--out-link", gcPath, packagePath
-            )
+            await try_captured("nix", "build", "--out-link", gcPath, packagePath)
+
             # Copy closure to substore, rsync saves a lot of implementation
             # headache here. --archive keeps all attributes, --hard-links
             # hardlinks everything hardlinkable.
@@ -386,6 +303,7 @@ class NodeServicer(csi_grpc.NodeBase):
                     *paths,
                     volumeRoot / "nix/store",
                 )
+
             # Create Nix database
             # This is an execline script that runs nix-store --dump-db | NIX_STATE_DIR=something nix-store --load-db
             await try_captured(
@@ -393,7 +311,10 @@ class NodeServicer(csi_grpc.NodeBase):
                 NIX_STATE_DIR,
                 *paths,
             )
-            # install gcroots in container
+
+            # install gcroots in container using chroot store
+            # TODO: Check if this is still needed when using chroot store
+            # into /nix/var/result from below
             await try_captured(
                 "nix",
                 "build",
@@ -403,7 +324,8 @@ class NodeServicer(csi_grpc.NodeBase):
                 NIX_STATE_DIR / "gcroots/result",
                 packagePath,
             )
-            # install /nix/var/result in container
+
+            # install /nix/var/result in container using chroot store
             await try_captured(
                 "nix",
                 "build",
@@ -425,7 +347,7 @@ class NodeServicer(csi_grpc.NodeBase):
         if request.readonly:
             # For readonly we use a bind mount, the benefit is that different
             # container stores using bindmounts will get the same inodes and
-            # share page cache with others, reducing host storage and memory usage.
+            # share page cache with others, reducing memory usage.
             mountCommand = [
                 "mount",
                 "--verbose",
@@ -466,45 +388,13 @@ class NodeServicer(csi_grpc.NodeBase):
         reply = csi_pb2.NodePublishVolumeResponse()
         await stream.send_message(reply)
 
-        async def copyToCache(packagePath: Path):
-            # Only run one copy per path per time
-            async with self.copyLock[packagePath]:
-                paths = [str(packagePath)]
-                # Get all paths recursively++
-                pathInfoDrv = await run_captured(
-                    "nix",
-                    "path-info",
-                    "--recursive",
-                    "--derivation",
-                    packagePath,
-                )
-                if pathInfoDrv.returncode == 0:
-                    paths += pathInfoDrv.stdout.splitlines()
-
-                # Unique the paths since we're running path-info twice
-                paths = list(set(paths))
-                # Filter derivation files
-                paths = {p for p in paths if not p.endswith(".drv")}
-                # Filter paths that are in self.copyPathsCache
-                paths = {p for p in paths if p not in self.copyPathsCache}
-                if len(paths) > 0:
-                    for _ in range(6):
-                        await asyncio.sleep(5)
-                        nixCopy = await run_console("/scripts/upload", *paths)
-                        if nixCopy.returncode == 0:
-                            for path in paths:
-                                self.copyPathsCache[path] = None
-                            break
-                        await asyncio.sleep(5)
-
-        if os.getenv("BUILD_CACHE") == "true":
+        if os.getenv("BUILD_CACHE") == "true" and buildInCSI:
             asyncio.create_task(copyToCache(packagePath))
 
     async def NodeUnpublishVolume(self, stream):
         request: csi_pb2.NodeUnpublishVolumeRequest | None = await stream.recv_message()
         if request is None:
             raise ValueError("NodeUnpublishVolumeRequest is None")
-        # log_request("NodeUnpublishVolume", request)
 
         errors = []
         targetPath = Path(request.target_path)
@@ -570,21 +460,16 @@ class NodeServicer(csi_grpc.NodeBase):
 
 
 async def serve():
-    # Clean old volumes on startup
-    reboot_cleanup()
-    # Create directories we operate in
-    CSI_ROOT.mkdir(parents=True, exist_ok=True)
-    CSI_VOLUMES.mkdir(parents=True, exist_ok=True)
-    CSI_GCROOTS.mkdir(parents=True, exist_ok=True)
-    await set_nix_path()
-
     sock_path = "/csi/csi.sock"
     Path(sock_path).unlink(missing_ok=True)
 
+    identityServicer = IdentityServicer()
+    nodeServicer = NodeServicer()
+
     server = Server(
         [
-            IdentityServicer(),
-            NodeServicer(),
+            identityServicer,
+            nodeServicer,
         ]
     )
 
@@ -595,4 +480,5 @@ async def serve():
 
     await server.start(sock=sock)
     logger.info(f"CSI driver (grpclib) listening on unix://{sock_path}")
+    await nodeServicer.initialize()
     await server.wait_closed()

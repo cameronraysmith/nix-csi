@@ -168,6 +168,7 @@ let
         pkgs.nix-csi
         pkgs.csi-proto-python
         pkgs.kr8s
+        tenacity
       ]
     );
     # env to add to PATH with direnv
