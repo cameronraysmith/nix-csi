@@ -18,7 +18,7 @@ in
             set -x
 
             extraopts=""
-            if ssh nix@nix-cache -- exit
+            if nix store ping --store ssh-ng://nix@nix-cache
             then
               extraopts="--option extra-substituters ssh-ng://nix@nix-cache?trusted=1"
             fi
