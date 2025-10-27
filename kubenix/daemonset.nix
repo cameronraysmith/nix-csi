@@ -61,7 +61,6 @@ in
                   securityContext.privileged = true;
                   env = {
                     _namedlist = true;
-                    NIX_CONFIG.value = "access-tokens = github.com=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";
                     BUILD_CACHE.value = lib.boolToString cfg.cache.enable;
                     CSI_ENDPOINT.value = "unix:///csi/csi.sock";
                     HOME.value = "/nix/var/nix-csi/root";
