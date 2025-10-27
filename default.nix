@@ -89,11 +89,14 @@ let
             };
             kluctl = {
               discriminator = "nix-csi";
-              pushManifest = {
-                enable = true;
-                to = "ssh://root@192.168.88.20";
-                failCachePush = false;
-              };
+              preDeployScript =
+                pkgs.writeScriptBin "preDeployScript" # bash
+                  ''
+                    #! ${pkgs.runtimeShell}
+                    set -euo pipefail
+                    set -x
+                    nix copy --no-check-sigs --to ssh-ng://nix@192.168.88.20 "$1"
+                  '';
             };
           };
         }
@@ -101,7 +104,7 @@ let
     };
 
     # script to build daemonset image
-    image = import ./nix/containerImage.nix{
+    image = import ./nix/containerImage.nix {
       inherit pkgs dinix;
       inherit (n2c) nix2container;
     };
