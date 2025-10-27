@@ -25,8 +25,8 @@ in
 
             nix build \
               --impure \
-              --no-link \
               --print-out-paths \
+              --out-link /result \
               $extraopts \
               --file \
               /buildinfo
@@ -35,11 +35,12 @@ in
           ''
             #! ${pkgs.runtimeShell}
             set -euo pipefail
+            set -x
 
             nix copy \
               --no-check-sigs \
               --to ssh-ng://nix@nix-cache \
-              $@
+               $(nix path-info --recursive --derivation /result | grep -v '\.drv$')
           '';
       };
       ConfigMap.nix-config.data = {
@@ -61,8 +62,7 @@ in
           # binary cache configuration
           ${lib.optionalString cfg.cache.enable ''
             trusted-public-keys = ${builtins.readFile ../cache-public} cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
-            substituters = http://nix-cache https://cache.nixos.org
-            trusted-substituters = ssh://nix@nix-cache ssh-ng://nix@nix-cache
+            substituters = http://nix-cache?compression=zstd https://cache.nixos.org
           ''}
           # Fuck purity
           warn-dirty = false

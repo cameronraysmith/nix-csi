@@ -13,13 +13,22 @@ let
       ''
         #! ${pkgs.runtimeShell}
         set -x
-        export PATH=${lib.makeBinPath [ pkgs.rsync ]}:$PATH
+        export PATH=${
+          lib.makeBinPath [
+            pkgs.rsync
+            pkgs.lix
+            pkgs.coreutils
+            pkgs.gnugrep
+          ]
+        }:$PATH
         ${lib.getExe dinixEval.config.internal.usersInstallScript}
+        mkdir --parents /tmp
         rsync --archive ${pkgs.dockerTools.binSh}/ /
         rsync --archive ${pkgs.dockerTools.caCertificates}/ /
         rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
         rsync --archive --copy-links --chmod=D700,F600 /etc/sshc/ $HOME/.ssh/ || true
-        source /scripts/build
+        /scripts/build
+        /scripts/upload
       '';
   dinixEval = import dinix {
     inherit pkgs;
