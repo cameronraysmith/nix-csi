@@ -25,7 +25,6 @@ in
             HostKey /etc/ssh/id_ed25519
 
             SyslogFacility DAEMON
-            LogLevel DEBUG3
             SetEnv PATH=/nix/var/result/bin
 
             PermitRootLogin prohibit-password
@@ -42,7 +41,7 @@ in
           '';
       };
       Secret.harmonia.stringData.sign_key = builtins.readFile ../cache-secret;
-      ConfigMap.harmonia.data."config.toml" = # TOML
+      ConfigMap.harmonia.data."config.toml" = # toml
         ''
           bind = "[::]:80"
           sign_key_paths = [ "/var/run/secrets/harmonia/sign_key" ]
@@ -60,6 +59,7 @@ in
             metadata.annotations.scriptsHash = hashAttrs nsRes.ConfigMap.nix-scripts;
             metadata.annotations.harmoniaHash = hashAttrs nsRes.ConfigMap.harmonia;
             metadata.annotations.sshHash = hashAttrs nsRes.Secret.sshd;
+            metadata.annotations.exprHash = hashAttrs nsRes.StatefulSet.nix-cache.spec.template.spec.volumes;
             spec = {
               initContainers = [
                 {

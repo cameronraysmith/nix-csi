@@ -10,12 +10,14 @@ in
       # mounts to /nix/var/nix-csi/home/.ssh
       Secret.sshc = lib.mkIf cfg.cache.enable {
         stringData = {
-          known_hosts = "nix-cache.${cfg.namespace}.svc ${builtins.readFile ../id_ed25519.pub}";
+          known_hosts = ''
+            nix-cache ${builtins.readFile ../id_ed25519.pub}
+          '';
           id_ed25519 = builtins.readFile ../id_ed25519;
           config = # ssh
             ''
               Host nix-cache
-                  HostName nix-cache.${cfg.namespace}.svc
+                  HostName nix-cache
                   User root
                   Port 22
                   IdentityFile ~/.ssh/id_ed25519
@@ -62,7 +64,7 @@ in
                     NIX_CONFIG.value = "access-tokens = github.com=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";
                     BUILD_CACHE.value = lib.boolToString cfg.cache.enable;
                     CSI_ENDPOINT.value = "unix:///csi/csi.sock";
-                    HOME.value = "/nix/var/nix-csi/home";
+                    HOME.value = "/nix/var/nix-csi/root";
                     KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
                     KUBE_NODE_NAME.valueFrom.fieldRef.fieldPath = "spec.nodeName";
                     USER.value = "root";

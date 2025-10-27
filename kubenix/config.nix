@@ -16,10 +16,18 @@ in
             #! ${pkgs.runtimeShell}
             set -euo pipefail
             set -x
+
+            extraopts=""
+            if ssh nix@nix-cache -- exit
+            then
+              extraopts="--option extra-substituters ssh-ng://nix@nix-cache?trusted=1"
+            fi
+
             nix build \
               --impure \
               --no-link \
               --print-out-paths \
+              $extraopts \
               --file \
               /buildinfo
           '';
@@ -27,12 +35,10 @@ in
           ''
             #! ${pkgs.runtimeShell}
             set -euo pipefail
-            set -x
-            export NIX_SSHOPTS="-i $HOME/.ssh/id_ed25519"
-            namespace=${cfg.namespace}
 
             nix copy \
-              --to ssh://nix-cache.$namespace.svc \
+              --no-check-sigs \
+              --to ssh-ng://nix@nix-cache \
               $@
           '';
       };
@@ -55,7 +61,8 @@ in
           # binary cache configuration
           ${lib.optionalString cfg.cache.enable ''
             trusted-public-keys = ${builtins.readFile ../cache-public} cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
-            substituters = http://nix-cache.${cfg.namespace}.svc https://cache.nixos.org
+            substituters = http://nix-cache https://cache.nixos.org
+            trusted-substituters = ssh://nix@nix-cache ssh-ng://nix@nix-cache
           ''}
           # Fuck purity
           warn-dirty = false

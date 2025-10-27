@@ -38,7 +38,7 @@ async def run(storePath: str, expression: str):
                                     "env": [
                                         {
                                             "name": "HOME",
-                                            "value": "/nix/var/nix-csi/home",
+                                            "value": "/nix/var/nix-csi/root",
                                         },
                                         {
                                             "name": "USER",
@@ -67,6 +67,10 @@ async def run(storePath: str, expression: str):
                                             "name": "nix-scripts",
                                             "mountPath": "/scripts",
                                         },
+                                        {
+                                            "name": "sshc",
+                                            "mountPath": "/etc/sshc",
+                                        },
                                     ],
                                 },
                             ],
@@ -81,6 +85,10 @@ async def run(storePath: str, expression: str):
                                 {
                                     "name": "nix-config",
                                     "configMap": {"name": "nix-config"},
+                                },
+                                {
+                                    "name": "sshc",
+                                    "secret": {"secretName": "sshc"},
                                 },
                                 {
                                     "name": "nix-scripts",

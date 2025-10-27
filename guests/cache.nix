@@ -60,11 +60,9 @@ let
               pkgs.writeScriptBin "setup" # bash
                 ''
                   #! ${pkgs.runtimeShell}
-                  # It's good to have a $HOME
-                  mkdir --parents ''${HOME}
-                  mkdir --parents /home/nix
                   # Stuff requred for $most things
                   mkdir --parents /run
+                  mkdir --parents /var/log
                   rsync --archive ${pkgs.dockerTools.binSh}/ /
                   rsync --archive ${pkgs.dockerTools.caCertificates}/ /
                   rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /

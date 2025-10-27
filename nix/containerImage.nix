@@ -12,11 +12,13 @@ let
     pkgs.writeScriptBin "build" # bash
       ''
         #! ${pkgs.runtimeShell}
+        set -x
         export PATH=${lib.makeBinPath [ pkgs.rsync ]}:$PATH
-        mkdir --parents $HOME
+        ${lib.getExe dinixEval.config.internal.usersInstallScript}
         rsync --archive ${pkgs.dockerTools.binSh}/ /
         rsync --archive ${pkgs.dockerTools.caCertificates}/ /
         rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
+        rsync --archive --copy-links --chmod=D700,F600 /etc/sshc/ $HOME/.ssh/ || true
         source /scripts/build
       '';
   dinixEval = import dinix {
@@ -26,7 +28,10 @@ let
         config = {
           users = {
             enable = true;
-            users.root.shell = pkgs.runtimeShell;
+            users.root = {
+              shell = pkgs.runtimeShell;
+              homeDir = "/nix/var/nix-csi/root";
+            };
           };
           services.boot.depends-on = [ "nix-csi" ];
           services.nix-csi = {
@@ -39,7 +44,6 @@ let
             ];
           };
           services.nix-daemon = {
-            env-file.variables.HOME = "/root";
             command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store local";
             depends-on = [ "setup" ];
           };
@@ -78,13 +82,11 @@ let
                     )
                   }
                   mkdir --parents /tmp
-                  mkdir --parents /run
-                  mkdir --parents ''${HOME}
                   rsync --archive ${pkgs.dockerTools.binSh}/ /
                   rsync --archive ${pkgs.dockerTools.caCertificates}/ /
                   rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
                   # Tricking OpenSSH's security policies, allow this to fail, sshc might not exist
-                  rsync --archive --copy-links --chmod=D700,F600 /etc/sshc/ /root/.ssh/ || true
+                  rsync --archive --copy-links --chmod=D700,F600 /etc/sshc/ $HOME/.ssh/ || true
                 ''
             );
           };
