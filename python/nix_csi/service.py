@@ -7,6 +7,7 @@ import socket
 import tempfile
 import time
 import math
+import textwrap
 
 from csi import csi_grpc, csi_pb2
 from grpclib.const import Status
@@ -102,6 +103,26 @@ class SubprocessResult(NamedTuple):
     elapsed: float
 
 
+async def try_captured(*args):
+    result = await run_console(*args)
+    if result.returncode != 0:
+        raise NixCsiError(
+            Status.INTERNAL,
+            f"{shlex.join([str(arg) for arg in args[:5]])}... failed: {result.returncode=} {result.combined=}",
+        )
+    return result
+
+
+async def try_console(*args, log_level: int = logging.DEBUG):
+    result = await run_console(*args, log_level=log_level)
+    if result.returncode != 0:
+        raise NixCsiError(
+            Status.INTERNAL,
+            f"{shlex.join([str(arg) for arg in args[:5]])}... failed: {result.returncode=}",
+        )
+    return result
+
+
 # Run async subprocess, capture output and returncode
 async def run_captured(*args):
     return await run_console(*args, log_level=logging.NOTSET)
@@ -156,7 +177,7 @@ def log_request(method_name: str, request: Any):
 async def set_nix_path():
     NIX_PATH_LINK = CSI_ROOT / "NIX_PATH"
     NIX_PATH_LINK.parent.mkdir(parents=True, exist_ok=True)
-    build = await run_console(
+    await try_console(
         "nix",
         "build",
         "--print-out-paths",
@@ -165,12 +186,6 @@ async def set_nix_path():
         "--out-link",
         NIX_PATH_LINK,
     )
-    if build.returncode != 0:
-        raise GRPCError(
-            Status.INVALID_ARGUMENT,
-            f"nix build (NIX_PATH) failed: {build.returncode=}",
-        )
-
     os.environ["NIX_PATH"] = NIX_PATH_LINK.read_text().strip()
 
 
@@ -189,15 +204,22 @@ class NodeServicer(csi_grpc.NodeBase):
         if request is None:
             raise ValueError("NodePublishVolumeRequest is None")
 
-        # TODO: Only do this on startup-ish
+        # TODO: Only do this on startup
         system = (
-            await run_captured(
-                "nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem"
+            await try_captured(
+                "nix",
+                "eval",
+                "--store",
+                "dummy--raw",
+                "--impure",
+                "--expr",
+                "builtins.currentSystem",
             )
         ).stdout
 
         targetPath = Path(request.target_path)
         expression = request.volume_context.get("expression")
+        buildInCSI = request.volume_context.get("buildInCSI", False)
         storePath = request.volume_context.get(system)
         packagePath: Path = Path("/nonexistent/path/that/should/never/exist")
         gcPath = CSI_GCROOTS / request.volume_id
@@ -253,7 +275,7 @@ class NodeServicer(csi_grpc.NodeBase):
                         logger.debug("Package path from cache")
                     else:
                         # eval expression to get storePath
-                        eval = await run_captured(
+                        eval = await try_captured(
                             "nix",
                             "eval",
                             "--raw",
@@ -261,36 +283,28 @@ class NodeServicer(csi_grpc.NodeBase):
                             "--expr",
                             f"import {expressionFile} {{}}",
                         )
-                        if eval.returncode != 0:
-                            raise GRPCError(
-                                Status.INVALID_ARGUMENT,
-                                f"nix eval (expression) failed: {eval.returncode=} {eval.combined=}",
-                            )
                         packagePath = Path(eval.stdout)
                         self.packagePathCache[expression] = packagePath
                         logger.debug("Package path from eval")
 
                     # Spawn a Job to build the expression
-                    if not packagePath.exists():
+                    if not packagePath.exists() and not buildInCSI:
                         jobResult = await runbuild.run(str(packagePath), expression)
                         if jobResult[0]:
-                            buildResult = await run_captured("nix", "build", storePath)
-                            if buildResult.returncode == 0:
-                                packagePath = Path(buildResult.stdout.splitlines()[0])
-                                self.packagePathCache[expression] = packagePath
-                                logger.debug("Package path from job and build")
+                            buildResult = await try_captured("nix", "build", storePath)
+                            packagePath = Path(buildResult.stdout.splitlines()[0])
+                            self.packagePathCache[expression] = packagePath
+                            logger.debug("Package path from job and build")
 
-                    # Build within CSI if Job build failed, this will be removed
-                    if not packagePath.exists():
+                    if not packagePath.exists() and buildInCSI:
                         buildCommand = [
                             "nix",
                             "build",
-                            "--impure",
                             "--print-out-paths",
                             "--out-link",
                             gcPath,
-                            "--expr",
-                            f"import {expressionFile} {{}}",
+                            "--file",
+                            expressionFile,
                         ]
 
                         # Build expression
@@ -316,9 +330,15 @@ class NodeServicer(csi_grpc.NodeBase):
                         self.packagePathCache[expression] = packagePath
                         logger.debug("Package path from local build")
         else:
-            raise GRPCError(
+            raise NixCsiError(
                 Status.INVALID_ARGUMENT,
                 "Set either `expression` or `storePath` in volume attributes",
+            )
+
+        if not packagePath.exists():
+            raise NixCsiError(
+                Status.INVALID_ARGUMENT,
+                "packagePath passed through all build steps yet doesn't exist",
             )
 
         # Root directory for volume. Contains /nix, also contains "workdir" and
@@ -336,36 +356,26 @@ class NodeServicer(csi_grpc.NodeBase):
             paths = pathInfoCacheResult
             logger.debug("Package closure from cache")
         else:
-            pathInfo = await run_captured(
+            pathInfo = await try_captured(
                 "nix",
                 "path-info",
                 "--recursive",
                 packagePath,
             )
-            if pathInfo.returncode != 0:
-                raise NixCsiError(
-                    Status.INTERNAL,
-                    f"nix path-info failed: {pathInfo.returncode=} {pathInfo.stderr=}",
-                )
             paths = pathInfo.stdout.splitlines()
             self.pathInfoCache[packagePath] = paths
             logger.debug("Package closure path-info")
 
         try:
             # Install CSI gcroots
-            csiGcroot = await run_captured(
+            await try_captured(
                 "nix", "build", "--out-link", gcPath, packagePath
             )
-            if csiGcroot.returncode != 0:
-                raise NixCsiError(
-                    Status.INTERNAL,
-                    f"failed to install CSI gcroots {csiGcroot.returncode=} {csiGcroot.stdout=} {csiGcroot.stderr=}",
-                )
             # Copy closure to substore, rsync saves a lot of implementation
             # headache here. --archive keeps all attributes, --hard-links
             # hardlinks everything hardlinkable.
             async with RSYNC_CONCURRENCY:
-                rsync = await run_captured(
+                await try_captured(
                     "rsync",
                     "--one-file-system",
                     "--recursive",
@@ -376,25 +386,15 @@ class NodeServicer(csi_grpc.NodeBase):
                     *paths,
                     volumeRoot / "nix/store",
                 )
-                if rsync.returncode != 0:
-                    raise NixCsiError(
-                        Status.INTERNAL,
-                        f"rsync failed {rsync.returncode=} {rsync.stderr=}",
-                    )
             # Create Nix database
             # This is an execline script that runs nix-store --dump-db | NIX_STATE_DIR=something nix-store --load-db
-            nix_init_db = await run_captured(
+            await try_captured(
                 "nix_init_db",
                 NIX_STATE_DIR,
                 *paths,
             )
-            if nix_init_db.returncode != 0:
-                raise NixCsiError(
-                    Status.INTERNAL,
-                    f"nix_init_db failed {nix_init_db.returncode=} {nix_init_db.stdout=} {nix_init_db.stderr=}",
-                )
             # install gcroots in container
-            gcroot = await run_captured(
+            await try_captured(
                 "nix",
                 "build",
                 "--store",
@@ -403,13 +403,8 @@ class NodeServicer(csi_grpc.NodeBase):
                 NIX_STATE_DIR / "gcroots/result",
                 packagePath,
             )
-            if gcroot.returncode != 0:
-                raise NixCsiError(
-                    Status.INTERNAL,
-                    f"failed to install container gcroots {gcroot.returncode=} {gcroot.stdout=} {gcroot.stderr=}",
-                )
             # install /nix/var/result in container
-            result = await run_captured(
+            await try_captured(
                 "nix",
                 "build",
                 "--store",
@@ -418,12 +413,7 @@ class NodeServicer(csi_grpc.NodeBase):
                 volumeRoot / "nix/var/result",
                 packagePath,
             )
-            if result.returncode != 0:
-                raise NixCsiError(
-                    Status.INTERNAL,
-                    f"failed to install container result {result.returncode=} {result.stdout=} {result.stderr=}",
-                )
-        except NixCsiError as ex:
+        except Exception as ex:
             # Remove gcroots if we failed something else
             gcPath.unlink(missing_ok=True)
             # Remove what we were working on
