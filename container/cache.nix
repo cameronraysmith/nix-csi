@@ -9,20 +9,16 @@
     # Umbrella service for CSI
     services.cache = {
       type = "internal";
-      waits-for = [
-        "cache-daemon"
-      ];
       depends-on = [
-        # "cache-daemon"
+        "cache-daemon"
         "openssh"
       ];
     };
     services.cache-daemon = {
       command = "${lib.getExe pkgs.nix-cache} --loglevel DEBUG";
-      depends-on = [
-        "cache-setup"
-        "nix-daemon"
-      ];
+      options = [ "shares-console" ];
+      depends-on = [ "cache-setup" ];
+      depends-ms = [ "nix-daemon" ];
     };
     services.cache-setup = {
       type = "scripted";
@@ -32,9 +28,7 @@
         pkgs.writeScriptBin "cache-setup" # bash
           ''
             #! ${pkgs.runtimeShell}
-            rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/ssh-mount/ /etc/ssh/
             rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/nix-mount/ /etc/nix/
-            rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
           '';
     };
   };

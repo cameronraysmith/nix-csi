@@ -183,6 +183,7 @@ let
         n2c.skopeo-nix2container
         pkgs.kluctl
         pkgs.buildah
+        pkgs.step-cli
       ];
     };
   };

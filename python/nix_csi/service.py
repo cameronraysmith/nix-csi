@@ -191,7 +191,7 @@ class NodeServicer(csi_grpc.NodeBase):
                         packagePath = Path(eval.stdout)
                         self.packagePathCache[expression] = packagePath
                         # Try fetching from cache
-                        await run_captured("nix", "build", packagePath)
+                        await run_captured("nix", "build", "--no-link", packagePath)
 
                     if not packagePath.exists():
                         buildCommand = [

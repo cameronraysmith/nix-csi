@@ -26,6 +26,7 @@ in
 
             SyslogFacility DAEMON
             SetEnv PATH=/nix/var/result/bin
+            SetEnv NIXPKGS_ALLOW_UNFREE=1
 
             PermitRootLogin prohibit-password
             PubkeyAuthentication yes
@@ -48,10 +49,11 @@ in
           template = {
             metadata.labels.app = "nix-cache";
 
-            metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-config;
+            metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-cache-config;
             metadata.annotations.sshHash = hashAttrs nsRes.Secret.sshd;
             metadata.annotations.exprHash = hashAttrs nsRes.StatefulSet.nix-cache.spec.template.spec.volumes;
             spec = {
+              serviceAccountName = "nix-csi";
               initContainers = [
                 {
                   name = "initcopy";
@@ -75,7 +77,7 @@ in
                   env = [
                     {
                       name = "HOME";
-                      value = "/var/empty";
+                      value = "/nix/var/nix-csi/root";
                     }
                   ];
                   ports = [
@@ -84,31 +86,31 @@ in
                       name = "http";
                     }
                   ];
-                  volumeMounts = [
-                    {
-                      name = "nix-store";
+                  volumeMounts = {
+                    _namedlist = true;
+                    nix-config.mountPath = "/etc/nix-mount";
+                    sshd.mountPath = "/etc/ssh-mount";
+                    nix-store = {
                       mountPath = "/nix";
                       subPath = "nix";
-                    }
-                    {
-                      name = "nix-config";
-                      mountPath = "/etc/nix";
-                    }
-                    {
-                      name = "sshd";
-                      mountPath = "/etc/ssh-mount";
-                    }
-                  ];
+                    };
+                  }
+                  // (lib.optionalAttrs cfg.cache.enable {
+                    sshc.mountPath = "/etc/sshc";
+                  });
                 };
               };
               volumes = {
                 _namedlist = true;
-                nix-config.configMap.name = "nix-config";
+                nix-config.configMap.name = "nix-cache-config";
                 sshd.secret = {
                   secretName = "sshd";
                   defaultMode = 384;
                 };
-              };
+              }
+              // (lib.optionalAttrs cfg.cache.enable {
+                sshc.secret.secretName = "sshc";
+              });
             };
           };
           volumeClaimTemplates = [

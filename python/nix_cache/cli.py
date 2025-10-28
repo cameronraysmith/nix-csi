@@ -3,6 +3,10 @@
 import asyncio
 import kr8s
 import time
+import argparse
+import logging
+from pathlib import Path
+from nix_csi.subprocessing import run_captured, run_console
 
 
 async def update_config(namespace: str):
@@ -31,7 +35,11 @@ async def update_config(namespace: str):
         ]
 
         print(f"Discovered builder IPs: {builder_ips}")
-        # TODO: Render configuration file and restart service here
+
+        machines_path = Path("/etc/nix/machines")
+        content = "".join(f"nix@{ip}?trusted=1\n" for ip in builder_ips)
+        machines_path.write_text(content)
+        await run_captured("dinitctl", "restart", "nix-daemon")
     except kr8s.NotFoundError:
         print("Resources not found, skipping update.")
     except Exception as e:
@@ -46,8 +54,8 @@ async def async_main():
     debounce_delay = 5  # seconds
     max_debounce_wait = 60  # seconds
 
-    print("Performing initial IP fetch on startup...")
-    await update_config(namespace)
+    # print("Performing initial IP fetch on startup...")
+    # await update_config(namespace)
 
     while True:
         try:
@@ -108,7 +116,28 @@ async def async_main():
             await asyncio.sleep(15)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="nix CSI driver")
+    parser.add_argument(
+        "--loglevel",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Set the logging level (default: INFO)",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    logging.basicConfig(
+        level=logging.WARN,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+    logger = logging.getLogger("nix-csi")
+    loglevel_str = logging.getLevelName(logger.getEffectiveLevel())
+    logger.info(f"Current log level: {loglevel_str}")
+
+    logging.getLogger("nix-csi").setLevel(getattr(logging, args.loglevel))
     try:
         asyncio.run(async_main())
     except KeyboardInterrupt:

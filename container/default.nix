@@ -35,6 +35,10 @@ let
             };
             groups.sshd.gid = 992;
           };
+          env-file.variables = {
+            PYTHONUNBUFFERED = "1"; # If something ends up print logging
+            NIXPKGS_ALLOW_UNFREE = "1"; # Allow building anything
+          };
           services.openssh = {
             type = "process";
             command = "${lib.getExe' pkgs.openssh "sshd"} -D -f /etc/ssh/sshd_config -e";

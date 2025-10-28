@@ -37,7 +37,7 @@ in
           template = {
             metadata.labels.app = "nix-csi-node";
             metadata.annotations."kubectl.kubernetes.io/default-container" = "nix-csi-node";
-            metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-config;
+            metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-cache-config;
             spec = {
               serviceAccountName = "nix-csi";
               initContainers = [
@@ -126,7 +126,7 @@ in
               };
               volumes = {
                 _namedlist = true;
-                nix-config.configMap.name = "nix-config";
+                nix-config.configMap.name = "nix-csi-config";
                 registration.hostPath.path = "/var/lib/kubelet/plugins_registry";
                 nix-store.hostPath = {
                   path = cfg.hostMountPath;
