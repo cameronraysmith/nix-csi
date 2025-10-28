@@ -22,7 +22,6 @@ class SubprocessResult(NamedTuple):
 async def try_captured(*args):
     result = await run_captured(*args)
     if result.returncode != 0:
-        logger.error("".join(traceback.format_stack()))
         raise GRPCError(
             Status.INTERNAL,
             f"{shlex.join([str(arg) for arg in args[:5]])}... failed: {result.returncode=}",
@@ -33,7 +32,6 @@ async def try_captured(*args):
 async def try_console(*args, log_level: int = logging.DEBUG):
     result = await run_console(*args, log_level=log_level)
     if result.returncode != 0:
-        logger.error("".join(traceback.format_stack()))
         raise GRPCError(
             Status.INTERNAL,
             f"{shlex.join([str(arg) for arg in args[:5]])}... failed: {result.returncode=}",

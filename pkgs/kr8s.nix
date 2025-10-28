@@ -19,14 +19,14 @@
 }:
 buildPythonPackage rec {
   pname = "kr8s";
-  version = "0.20.12";
+  version = "0.20.13";
   pyproject = true;
 
   src = fetchFromGitHub {
     owner = "kr8s-org";
     repo = "kr8s";
     tag = "v${version}";
-    hash = "sha256-KhbJfk2hfqA2mNoTkKwFC6kPrqwzpvYCUIlMWsUOcEU=";
+    hash = "sha256-9fo18ririQwBzxuPp8+oH20URv0nvXCkv0eIUL4xrZ8=";
   };
 
   build-system = [
@@ -46,8 +46,6 @@ buildPythonPackage rec {
     httpx-ws
     python-box
   ];
-
-  nativeCheckInputs = [ ];
 
   pythonImportsCheck = [ "kr8s" ];
 

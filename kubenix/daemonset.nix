@@ -12,6 +12,7 @@ in
         stringData = {
           known_hosts = ''
             nix-cache ${builtins.readFile ../id_ed25519.pub}
+            * ${builtins.readFile ../id_ed25519.pub}
           '';
           id_ed25519 = builtins.readFile ../id_ed25519;
           config = # ssh
@@ -37,7 +38,6 @@ in
             metadata.labels.app = "nix-csi-node";
             metadata.annotations."kubectl.kubernetes.io/default-container" = "nix-csi-node";
             metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-config;
-            metadata.annotations.scriptsHash = hashAttrs nsRes.ConfigMap.nix-scripts;
             spec = {
               serviceAccountName = "nix-csi";
               initContainers = [
@@ -66,14 +66,18 @@ in
                     HOME.value = "/nix/var/nix-csi/root";
                     KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
                     KUBE_NODE_NAME.valueFrom.fieldRef.fieldPath = "spec.nodeName";
+                    KUBE_POD_IP.valueFrom.fieldRef.fieldPath = "status.podIP";
                     USER.value = "root";
+                  }
+                  // lib.optionalAttrs (lib.stringLength (builtins.getEnv "GITHUB_KEY") > 0) {
+                    NIX_CONFIG.value = "access-tokens = github.com=${builtins.getEnv "GITHUB_KEY"}";
                   };
                   volumeMounts = {
                     _namedlist = true;
                     csi-socket.mountPath = "/csi";
                     nix-config.mountPath = "/etc/nix";
-                    nix-scripts.mountPath = "/scripts";
                     registration.mountPath = "/registration";
+                    sshd.mountPath = "/etc/ssh-mount";
                     kubelet = {
                       mountPath = "/var/lib/kubelet";
                       mountPropagation = "Bidirectional";
@@ -122,10 +126,6 @@ in
                 _namedlist = true;
                 nix-config.configMap.name = "nix-config";
                 registration.hostPath.path = "/var/lib/kubelet/plugins_registry";
-                nix-scripts.configMap = {
-                  name = "nix-scripts";
-                  defaultMode = 493; # 755
-                };
                 nix-store.hostPath = {
                   path = cfg.hostMountPath;
                   type = "DirectoryOrCreate";
@@ -137,6 +137,10 @@ in
                 kubelet.hostPath = {
                   path = "/var/lib/kubelet";
                   type = "Directory";
+                };
+                sshd.secret = {
+                  secretName = "sshd";
+                  defaultMode = 384;
                 };
               }
               // (lib.optionalAttrs cfg.cache.enable {

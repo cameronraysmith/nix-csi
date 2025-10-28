@@ -84,7 +84,7 @@ let
               };
               ctest = {
                 enable = true;
-                replicas = 0;
+                replicas = 1;
               };
             };
             kluctl = {
@@ -95,7 +95,7 @@ let
                     #! ${pkgs.runtimeShell}
                     set -euo pipefail
                     set -x
-                    nix copy --no-check-sigs --to ssh-ng://nix@192.168.88.20 "$1"
+                    nix copy --no-check-sigs --to ssh-ng://nix@192.168.88.20 "$1" || true
                   '';
             };
           };

@@ -6,7 +6,7 @@ let
 in
 {
   options.nix-csi.cache = {
-    enable = lib.mkEnableOption "harmonia";
+    enable = lib.mkEnableOption "nix-cache";
     storageClassName = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
     };
@@ -33,20 +33,13 @@ in
             ChallengeResponseAuthentication no
             UsePAM no
 
-            AuthorizedKeysFile %h/.ssh/authorized_keys /etc/ssh/authorized_keys
+            AuthorizedKeysFile %h/.ssh/authorized_keys
 
             StrictModes no
 
             Subsystem sftp internal-sftp
           '';
       };
-      Secret.harmonia.stringData.sign_key = builtins.readFile ../cache-secret;
-      ConfigMap.harmonia.data."config.toml" = # toml
-        ''
-          bind = "[::]:80"
-          sign_key_paths = [ "/var/run/secrets/harmonia/sign_key" ]
-        '';
-
       StatefulSet.nix-cache = {
         spec = {
           serviceName = "nix-cache";
@@ -56,8 +49,6 @@ in
             metadata.labels.app = "nix-cache";
 
             metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-config;
-            metadata.annotations.scriptsHash = hashAttrs nsRes.ConfigMap.nix-scripts;
-            metadata.annotations.harmoniaHash = hashAttrs nsRes.ConfigMap.harmonia;
             metadata.annotations.sshHash = hashAttrs nsRes.Secret.sshd;
             metadata.annotations.exprHash = hashAttrs nsRes.StatefulSet.nix-cache.spec.template.spec.volumes;
             spec = {
@@ -76,17 +67,13 @@ in
               ];
               containers = {
                 _namedlist = true;
-                harmonia = {
+                cache = {
                   command = [ "dinit" ];
                   image = "quay.io/nix-csi/scratch:1.0.1";
                   env = [
                     {
                       name = "HOME";
                       value = "/var/empty";
-                    }
-                    {
-                      name = "CONFIG_FILE";
-                      value = "/etc/harmonia/config.toml";
                     }
                   ];
                   ports = [
@@ -109,26 +96,20 @@ in
                       name = "sshd";
                       mountPath = "/etc/ssh-mount";
                     }
-                    {
-                      name = "harmonia-config";
-                      mountPath = "/etc/harmonia";
-                    }
-                    {
-                      name = "harmonia-secret";
-                      mountPath = "/var/run/secrets/harmonia";
-                    }
                   ];
                 };
               };
               volumes = {
                 _namedlist = true;
                 nix-config.configMap.name = "nix-config";
-                harmonia-secret.secret.secretName = "harmonia";
-                harmonia-config.configMap.name = "harmonia";
-                sshd.secret.secretName = "sshd";
+                sshd.secret = {
+                  secretName = "sshd";
+                  defaultMode = 384;
+                };
                 nix-csi.csi = {
                   driver = "nix.csi.store";
                   readOnly = false;
+                  volumeAttributes.buildInCSI = "";
                   volumeAttributes.expression = builtins.readFile ../guests/cache.nix;
                 };
               };

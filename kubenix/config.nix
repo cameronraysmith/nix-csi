@@ -10,39 +10,6 @@ in
 {
   config = lib.mkIf cfg.enable {
     kubernetes.resources.${cfg.namespace} = {
-      ConfigMap.nix-scripts.data = {
-        "build" = # bash
-          ''
-            #! ${pkgs.runtimeShell}
-            set -euo pipefail
-            set -x
-
-            extraopts=""
-            if nix store ping --store ssh-ng://nix@nix-cache
-            then
-              extraopts="--option extra-substituters ssh-ng://nix@nix-cache?trusted=1"
-            fi
-
-            nix build \
-              --impure \
-              --print-out-paths \
-              --out-link /result \
-              $extraopts \
-              --file \
-              /buildinfo
-          '';
-        "upload" = # bash
-          ''
-            #! ${pkgs.runtimeShell}
-            set -euo pipefail
-            set -x
-
-            nix copy \
-              --no-check-sigs \
-              --to ssh-ng://nix@nix-cache \
-               $(nix path-info --recursive --derivation /result | grep -v '\.drv$')
-          '';
-      };
       ConfigMap.nix-config.data = {
         "nix.conf" = ''
           # Use nix daemon for builds
@@ -51,19 +18,14 @@ in
           trusted-users = root nix
           # Allow everyone to Nix!
           allowed-users = *
-          # Use root as builder since that's the only user in the container.
-          build-users-group = nobody
           # Auto allocare uids so we don't have to create lots of users in containers
           auto-allocate-uids = true
           # This supposedly helps with the sticky cache issue
           fallback = true
           # Enable common features
           experimental-features = nix-command flakes auto-allocate-uids fetch-closure pipe-operator
-          # binary cache configuration
-          ${lib.optionalString cfg.cache.enable ''
-            trusted-public-keys = ${builtins.readFile ../cache-public} cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
-            substituters = http://nix-cache?compression=zstd https://cache.nixos.org
-          ''}
+          # substituters
+          extra-substituters = ssh-ng://nix@nix-cache?trusted=1&priority=20
           # Fuck purity
           warn-dirty = false
         '';

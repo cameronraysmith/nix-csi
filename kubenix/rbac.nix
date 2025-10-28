@@ -7,52 +7,26 @@ in
     kubernetes.resources.${cfg.namespace} = {
       ServiceAccount.nix-csi = { };
 
-      Role.nix-csi = {
+      ClusterRole.nix-csi = {
         rules = [
-          {
-            # Full control over Jobs in the "batch" API group.
-            apiGroups = [ "batch" ];
-            resources = [ "jobs" ];
-            verbs = [
-              "create"
-              "get"
-              "list"
-              "watch"
-              "delete"
-              "patch"
-            ];
-          }
           {
             # Read-only access to Pods and their logs in the core API group.
             apiGroups = [ "" ];
             resources = [
+              "nodes"
               "pods"
-              "pods/log"
             ];
             verbs = [
               "get"
               "list"
               "watch"
-            ];
-          }
-          {
-            # Permissions for creating, managing, and owning ConfigMaps.
-            apiGroups = [ "" ]; # ConfigMaps are in the core API group
-            resources = [ "configmaps" ];
-            verbs = [
-              "create"
-              "get"
-              "list"
-              "watch"
-              "patch"
-              "delete"
             ];
           }
         ];
       };
 
       # Binds the Role to the ServiceAccount.
-      RoleBinding.nix-csi = {
+      ClusterRoleBinding.nix-csi = {
         subjects = [
           {
             kind = "ServiceAccount";
@@ -61,7 +35,7 @@ in
           }
         ];
         roleRef = {
-          kind = "Role";
+          kind = "ClusterRole";
           name = "nix-csi";
           apiGroup = "rbac.authorization.k8s.io";
         };

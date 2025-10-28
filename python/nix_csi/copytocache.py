@@ -1,7 +1,10 @@
+import logging
 from collections import defaultdict
 from pathlib import Path
 from asyncio import Semaphore, sleep
 from .subprocessing import run_captured, run_console
+
+logger = logging.getLogger("nix-csi")
 
 # Locks that prevent the same derivation to be uploaded in parallel
 copyLock: defaultdict[Path, Semaphore] = defaultdict(Semaphore)
@@ -29,7 +32,10 @@ async def copyToCache(packagePath: Path):
         if len(paths) > 0:
             for _ in range(6):
                 await sleep(5)
-                nixCopy = await run_console("/scripts/upload", *paths)
+                nixCopy = await run_captured(
+                    "nix", "copy", "--to", "ssh-ng://nix@nix-cache", *paths
+                )
                 if nixCopy.returncode == 0:
+                    logger.debug(nixCopy.combined)
                     break
                 await sleep(5)

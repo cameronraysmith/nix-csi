@@ -41,8 +41,24 @@ let
               shell = pkgs.runtimeShell;
               homeDir = "/nix/var/nix-csi/root";
             };
+            users.nix = {
+              uid = 1000;
+              gid = 1000;
+              comment = "Nix worker user";
+            };
+            groups.nix.gid = 1000;
+            groups.nixbld.gid = 30000;
+            users.sshd = {
+              uid = 993;
+              gid = 992;
+              comment = "SSH privilege separation user";
+            };
+            groups.sshd.gid = 992;
           };
-          services.boot.depends-on = [ "nix-csi" ];
+          services.boot.depends-on = [
+            "nix-csi"
+            "openssh"
+          ];
           services.nix-csi = {
             command = "${lib.getExe pkgs.nix-csi} --loglevel DEBUG";
             options = [ "shares-console" ];
@@ -51,6 +67,12 @@ let
               "setup"
               "gc"
             ];
+          };
+          services.openssh = {
+            type = "process";
+            command = "${lib.getExe' pkgs.openssh "sshd"} -D -f /etc/ssh/sshd_config -e";
+            options = [ "shares-console" ];
+            depends-on = [ "setup" ];
           };
           services.nix-daemon = {
             command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store local";
@@ -91,11 +113,14 @@ let
                     )
                   }
                   mkdir --parents /tmp
+                  mkdir --parents /var/log
                   rsync --archive ${pkgs.dockerTools.binSh}/ /
                   rsync --archive ${pkgs.dockerTools.caCertificates}/ /
                   rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
                   # Tricking OpenSSH's security policies, allow this to fail, sshc might not exist
                   rsync --archive --copy-links --chmod=D700,F600 /etc/sshc/ $HOME/.ssh/ || true
+                  rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/ssh-mount/ /etc/ssh/
+                  rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
                 ''
             );
           };
@@ -128,6 +153,8 @@ let
       lix
       openssh
       util-linuxMinimal
+      gnugrep
+      getent
     ];
   };
 in

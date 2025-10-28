@@ -16,3 +16,4 @@ dependencies = []
 
 [project.scripts]
 nix-csi = "nix_csi.cli:main"
+nix-cache = "nix_cache.cli:main"

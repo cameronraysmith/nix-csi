@@ -34,6 +34,8 @@ let
           #include <stdio.h>
           #include <unistd.h>
 
+          // ${toString builtins.currentTime}
+
           #define ARRAY_SIZE 100 * 1024 * 1024
 
           static char big_array[ARRAY_SIZE] = {1};

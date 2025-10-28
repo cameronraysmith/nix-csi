@@ -7,8 +7,8 @@ import tempfile
 import math
 
 from csi import csi_grpc, csi_pb2
+from grpclib import GRPCError
 from grpclib.const import Status
-from grpclib.exceptions import GRPCError
 from grpclib.server import Server
 from importlib import metadata
 from pathlib import Path
@@ -16,12 +16,10 @@ from typing import List
 from cachetools import TTLCache
 from asyncio import Semaphore, sleep
 from collections import defaultdict
-from tenacity import AsyncRetrying, RetryError, stop_after_attempt
-from .runbuild import runJobBuild
 from .identityservicer import IdentityServicer
 from .copytocache import copyToCache
 from .subprocessing import run_captured, run_console, try_captured, try_console
-from .errorhandling import NixCsiError
+from .kubernetes import get_builder_ips
 
 logger = logging.getLogger("nix-csi")
 
@@ -126,20 +124,16 @@ class NodeServicer(csi_grpc.NodeBase):
         if request is None:
             raise ValueError("NodePublishVolumeRequest is None")
 
-        try:
-            async for attempt in AsyncRetrying(stop=stop_after_attempt(120)):
-                with attempt:
-                    if not self.initialized:
-                        await sleep(1)
-                        raise Exception("NodeServicer not initialized")
-        except RetryError:
-            raise NixCsiError(
-                Status.INTERNAL, "NodeServicer not initialized after 120 seconds"
+        for i in range(120):
+            if not self.initialized:
+                await sleep(1)
+        if not self.initialized:
+            raise GRPCError(
+                Status.INTERNAL, "NodeServicer not initialized within 120 seconds"
             )
 
         targetPath = Path(request.target_path)
         expression = request.volume_context.get("expression")
-        buildInCSI = request.volume_context.get("buildInCSI", False)
         storePath = request.volume_context.get(self.system)
         packagePath: Path = Path("/nonexistent/path/that/should/never/exist")
         gcPath = CSI_GCROOTS / request.volume_id
@@ -154,28 +148,20 @@ class NodeServicer(csi_grpc.NodeBase):
                 buildCommand = [
                     "nix",
                     "build",
+                    "--extra-substituters",
+                    "ssh-ng://nix@nix-cache?trusted=1&priority=20",
                     "--out-link",
                     gcPath,
                     packagePath,
                 ]
 
+                # Try reaching cache for substitution
+                await try_captured(
+                    "nix", "store", "ping", "--store", "ssh-ng://nix@nix-cache"
+                )
+
                 # Fetch storePath from caches
-                build = await run_console(*buildCommand)
-                if build.returncode != 0:
-                    buildCommand += [
-                        "--substituters",
-                        "https://cache.nixos.org",
-                    ]
-                    build = await run_console(*buildCommand)
-                    if build.returncode != 0:
-                        logger.error(
-                            f"nix build (expression) failed: {build.returncode=}"
-                        )
-                        # Use GRPCError here, we don't need to log output again
-                        raise GRPCError(
-                            Status.INVALID_ARGUMENT,
-                            f"nix build (expression) failed: {build.returncode=} {build.stderr=}",
-                        )
+                await try_console(*buildCommand)
                 if packagePath.exists():
                     self.packagePathCache[storePath] = packagePath
 
@@ -207,53 +193,67 @@ class NodeServicer(csi_grpc.NodeBase):
                         # Try fetching from cache
                         await run_captured("nix", "build", packagePath)
 
-                    # Spawn a Job to build the expression
-                    if not packagePath.exists() and not buildInCSI:
-                        jobResult = await runJobBuild(str(packagePath), expression)
-                        if jobResult[0]:
-                            # Try fetching from cache
-                            await try_captured("nix", "build", packagePath)
-                            self.packagePathCache[expression] = packagePath
-
-                    if not packagePath.exists() and buildInCSI:
+                    if not packagePath.exists():
                         buildCommand = [
                             "nix",
                             "build",
+                            "--print-out-paths",
                             "--out-link",
                             gcPath,
                             "--file",
                             expressionFile,
                         ]
 
-                        # Build expression
-                        build = await run_console(*buildCommand)
-                        if build.returncode != 0:
+                        # Try reaching cache for substitution
+                        try:
+                            await try_captured(
+                                "nix",
+                                "store",
+                                "ping",
+                                "--store",
+                                "ssh-ng://nix@nix-cache",
+                            )
                             buildCommand += [
-                                "--substituters",
-                                "https://cache.nixos.org",
+                                "--extra-substituters",
+                                "ssh-ng://nix@nix-cache?trusted=1&priority=20",
                             ]
-                            # Retry build with only CNS if it fails
-                            build = await run_console(*buildCommand)
-                            if build.returncode != 0:
-                                logger.error(
-                                    f"nix build (expression) failed: {build.returncode=}"
+                        except Exception:
+                            pass
+
+                        reachable_builders = []
+                        for ip in await get_builder_ips(NAMESPACE):
+                            if ip == os.environ["KUBE_POD_IP"]:
+                                continue
+                            try:
+                                await try_captured(
+                                    "nix",
+                                    "store",
+                                    "ping",
+                                    "--store",
+                                    f"ssh-ng://nix@{ip}",
                                 )
-                                # Use GRPCError here, we don't need to log output again
-                                raise GRPCError(
-                                    Status.INVALID_ARGUMENT,
-                                    f"nix build (expression) failed: {build.returncode=} {build.stderr=}",
+                                reachable_builders.append(
+                                    f"ssh-ng://nix@{ip}?trusted=1"
                                 )
+                            except Exception:
+                                pass
+                        if len(reachable_builders) > 0:
+                            buildCommand += ["--builders", ";".join(reachable_builders)]
+
+                        # Update packagePath when we've built it, required to
+                        # prevent impure derivations from never "finalizing"
+                        packagePath = Path((await try_console(*buildCommand)).stdout.splitlines()[0])
 
                         if packagePath.exists():
                             self.packagePathCache[expression] = packagePath
         else:
-            raise NixCsiError(
+            raise GRPCError(
                 Status.INVALID_ARGUMENT,
                 "Set either `expression` or `storePath` in volume attributes",
             )
 
         if not packagePath.exists():
-            raise NixCsiError(
+            raise GRPCError(
                 Status.INVALID_ARGUMENT,
                 "packagePath passed through all build steps yet doesn't exist",
             )
@@ -380,7 +380,7 @@ class NodeServicer(csi_grpc.NodeBase):
         if mount.returncode == MOUNT_ALREADY_MOUNTED:
             logger.debug(f"Mount target {targetPath} was already mounted")
         elif mount.returncode != 0:
-            raise NixCsiError(
+            raise GRPCError(
                 Status.INTERNAL,
                 f"Failed to mount {mount.returncode=} {mount.stderr=}",
             )
@@ -388,7 +388,7 @@ class NodeServicer(csi_grpc.NodeBase):
         reply = csi_pb2.NodePublishVolumeResponse()
         await stream.send_message(reply)
 
-        if os.getenv("BUILD_CACHE") == "true" and buildInCSI:
+        if os.getenv("BUILD_CACHE") == "true":
             asyncio.create_task(copyToCache(packagePath))
 
     async def NodeUnpublishVolume(self, stream):
@@ -421,7 +421,7 @@ class NodeServicer(csi_grpc.NodeBase):
                 errors.append(f"volume cleanup failed: {ex}")
 
         if errors:
-            raise NixCsiError(Status.INTERNAL, "; ".join(errors))
+            raise GRPCError(Status.INTERNAL, "; ".join(errors))
 
         reply = csi_pb2.NodeUnpublishVolumeResponse()
         await stream.send_message(reply)
@@ -444,19 +444,19 @@ class NodeServicer(csi_grpc.NodeBase):
 
     async def NodeGetVolumeStats(self, stream):
         del stream  # typechecker
-        raise NixCsiError(Status.UNIMPLEMENTED, "NodeGetVolumeStats not implemented")
+        raise GRPCError(Status.UNIMPLEMENTED, "NodeGetVolumeStats not implemented")
 
     async def NodeExpandVolume(self, stream):
         del stream  # typechecker
-        raise NixCsiError(Status.UNIMPLEMENTED, "NodeExpandVolume not implemented")
+        raise GRPCError(Status.UNIMPLEMENTED, "NodeExpandVolume not implemented")
 
     async def NodeStageVolume(self, stream):
         del stream  # typechecker
-        raise NixCsiError(Status.UNIMPLEMENTED, "NodeStageVolume not implemented")
+        raise GRPCError(Status.UNIMPLEMENTED, "NodeStageVolume not implemented")
 
     async def NodeUnstageVolume(self, stream):
         del stream  # typechecker
-        raise NixCsiError(Status.UNIMPLEMENTED, "NodeUnstageVolume not implemented")
+        raise GRPCError(Status.UNIMPLEMENTED, "NodeUnstageVolume not implemented")
 
 
 async def serve():

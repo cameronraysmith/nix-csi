@@ -28,7 +28,6 @@ let
             depends-on = [
               "openssh"
               "nix-daemon"
-              "harmonia"
             ];
           };
           services.openssh = {
@@ -43,14 +42,10 @@ let
               "setup"
             ];
           };
-          services.harmonia = {
-            type = "process";
-            command = "${lib.getExe pkgs.harmonia}";
-            options = [ "shares-console" ];
-            run-as = "root";
+          services.nix-cache = {
+            command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store local";
             depends-on = [
               "setup"
-              "nix-daemon"
             ];
           };
           # set up root filesystem with paths required for a Linux system to function normally
@@ -68,6 +63,7 @@ let
                   rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
                   # Tricking OpenSSH's security policies
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/ssh-mount/ /etc/ssh/
+                  rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/nix-mount/ /etc/nix/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
                   chown -R nix:nix /home/nix
                 ''
