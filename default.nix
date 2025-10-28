@@ -104,7 +104,7 @@ let
     };
 
     # script to build daemonset image
-    image = import ./nix/containerImage.nix {
+    image = import ./container {
       inherit pkgs dinix;
       inherit (n2c) nix2container;
     };
@@ -154,7 +154,7 @@ let
           if ! test -f ./id_ed25519 || ! test -f ./id_ed25519.pub
               ssh-keygen -t ed25519 -f ./id_ed25519 -C nix-cache -N ""
           end
-          # Build DaemonSet containerImage
+          # Build container image
           nix run --file . imageToContainerd || begin
               echo "DaemonSet image failed"
               return 1

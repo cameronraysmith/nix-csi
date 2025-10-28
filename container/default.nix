@@ -8,31 +8,11 @@
 }:
 let
   lib = pkgs.lib;
-  build =
-    pkgs.writeScriptBin "build" # bash
-      ''
-        #! ${pkgs.runtimeShell}
-        set -x
-        export PATH=${
-          lib.makeBinPath [
-            pkgs.rsync
-            pkgs.lix
-            pkgs.coreutils
-            pkgs.gnugrep
-          ]
-        }:$PATH
-        ${lib.getExe dinixEval.config.internal.usersInstallScript}
-        mkdir --parents /tmp
-        rsync --archive ${pkgs.dockerTools.binSh}/ /
-        rsync --archive ${pkgs.dockerTools.caCertificates}/ /
-        rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
-        rsync --archive --copy-links --chmod=D700,F600 /etc/sshc/ $HOME/.ssh/ || true
-        /scripts/build
-        /scripts/upload
-      '';
   dinixEval = import dinix {
     inherit pkgs;
     modules = [
+      ./csi.nix
+      ./cache.nix
       {
         config = {
           users = {
@@ -55,28 +35,15 @@ let
             };
             groups.sshd.gid = 992;
           };
-          services.boot.depends-on = [
-            "nix-csi"
-            "openssh"
-          ];
-          services.nix-csi = {
-            command = "${lib.getExe pkgs.nix-csi} --loglevel DEBUG";
-            options = [ "shares-console" ];
-            depends-on = [
-              "nix-daemon"
-              "setup"
-              "gc"
-            ];
-          };
           services.openssh = {
             type = "process";
             command = "${lib.getExe' pkgs.openssh "sshd"} -D -f /etc/ssh/sshd_config -e";
             options = [ "shares-console" ];
-            depends-on = [ "setup" ];
+            depends-on = [ "shared-setup" ];
           };
           services.nix-daemon = {
             command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store local";
-            depends-on = [ "setup" ];
+            depends-on = [ "shared-setup" ];
           };
           services.gc = {
             type = "scripted";
@@ -90,14 +57,14 @@ let
             options = [ "shares-console" ];
             depends-on = [
               "nix-daemon"
-              "setup"
+              "shared-setup"
             ];
           };
-          services.setup = {
+          services.shared-setup = {
             type = "scripted";
             options = [ "shares-console" ];
             command = lib.getExe (
-              pkgs.writeScriptBin "setup" # bash
+              pkgs.writeScriptBin "shared-setup" # bash
                 ''
                   #! ${pkgs.runtimeShell}
                   set -euo pipefail
@@ -147,7 +114,6 @@ let
     paths = with pkgs; [
       dinixEval.config.containerWrapper
       bash # Used for build and upload scripts
-      build
       coreutils
       fishMinimal
       lix

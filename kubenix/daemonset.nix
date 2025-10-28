@@ -55,9 +55,11 @@ in
               containers = {
                 _namedlist = true;
                 nix-csi-node = {
-                  # image = cfg.image;
                   image = "quay.io/nix-csi/scratch:1.0.1";
-                  command = [ "dinit" ];
+                  command = [
+                    "dinit"
+                    "csi"
+                  ];
                   securityContext.privileged = true;
                   env = {
                     _namedlist = true;

@@ -55,11 +55,10 @@ in
               initContainers = [
                 {
                   name = "initcopy";
-                  image = "quay.io/nix-csi/scratch:1.0.1";
+                  image = cfg.image;
                   command = [ "initcopy" ];
                   volumeMounts = {
                     _namedlist = true;
-                    nix-csi.mountPath = "/nix";
                     nix-store.mountPath = "/nix-volume";
                     nix-config.mountPath = "/etc/nix";
                   };
@@ -68,7 +67,10 @@ in
               containers = {
                 _namedlist = true;
                 cache = {
-                  command = [ "dinit" ];
+                  command = [
+                    "dinit"
+                    "cache"
+                  ];
                   image = "quay.io/nix-csi/scratch:1.0.1";
                   env = [
                     {
@@ -105,12 +107,6 @@ in
                 sshd.secret = {
                   secretName = "sshd";
                   defaultMode = 384;
-                };
-                nix-csi.csi = {
-                  driver = "nix.csi.store";
-                  readOnly = false;
-                  volumeAttributes.buildInCSI = "";
-                  volumeAttributes.expression = builtins.readFile ../guests/cache.nix;
                 };
               };
             };
