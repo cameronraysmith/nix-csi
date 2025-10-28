@@ -163,19 +163,23 @@ let
         '';
 
     # simpler than devshell
-    python = pkgs.python3.withPackages (
+    pypkgs = (
       pypkgs: with pypkgs; [
         pkgs.nix-csi
         pkgs.csi-proto-python
         pkgs.kr8s
-        tenacity
       ]
     );
+    python = pkgs.python3.withPackages pypkgs;
+    xonsh = pkgs.xonsh.override {
+      extraPackages = pypkgs;
+    };
     # env to add to PATH with direnv
     repoenv = pkgs.buildEnv {
       name = "repoenv";
       paths = [
         python
+        xonsh
         n2c.skopeo-nix2container
         pkgs.kluctl
         pkgs.buildah
