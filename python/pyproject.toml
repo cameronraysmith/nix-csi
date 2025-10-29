@@ -17,6 +17,7 @@ dependencies = []
 [project.scripts]
 nix-csi = "nix_csi.cli:main"
 nix-cache = "nix_cache.cli:main"
+nix-timegc = "nix_timegc.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["nix_csi", "nix_cache"]
+packages = ["nix_csi", "nix_cache", "nix_timegc"]

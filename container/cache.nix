@@ -11,6 +11,7 @@
       type = "internal";
       depends-on = [
         "cache-daemon"
+        "cache-gc"
         "openssh"
       ];
     };
@@ -30,6 +31,23 @@
             #! ${pkgs.runtimeShell}
             rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/nix-mount/ /etc/nix/
           '';
+    };
+    services.cache-gc = {
+      type = "scripted";
+      command =
+        pkgs.writeScriptBin "cache-gc" # bash
+          ''
+            #! ${pkgs.runtimeShell}
+            # Fix gcroots for /nix/var/result
+            nix build --out-link /nix/var/result /nix/var/result
+            # Collect old shit
+            ${lib.getExe pkgs.nix-timegc} 86400
+          '';
+      options = [ "shares-console" ];
+      depends-on = [
+        "nix-daemon"
+        "shared-setup"
+      ];
     };
   };
 }

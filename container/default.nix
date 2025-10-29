@@ -49,21 +49,6 @@ let
             command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store local";
             depends-on = [ "shared-setup" ];
           };
-          services.gc = {
-            type = "scripted";
-            command =
-              pkgs.writeScriptBin "gc" # bash
-                ''
-                  # Fix gcroots for /nix/var/result
-                  nix build --out-link /nix/var/result /nix/var/result
-                  nix store gc
-                '';
-            options = [ "shares-console" ];
-            depends-on = [
-              "nix-daemon"
-              "shared-setup"
-            ];
-          };
           services.shared-setup = {
             type = "scripted";
             options = [ "shares-console" ];

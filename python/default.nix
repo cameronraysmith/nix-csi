@@ -36,4 +36,5 @@ in
 {
   csi = lib.recursiveUpdate python { meta.mainProgram = "nix-csi"; };
   cache = lib.recursiveUpdate python { meta.mainProgram = "nix-cache"; };
+  timegc = lib.recursiveUpdate python { meta.mainProgram = "nix-timegc"; };
 }

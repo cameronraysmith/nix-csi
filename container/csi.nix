@@ -19,8 +19,8 @@
       options = [ "shares-console" ];
       depends-on = [
         "csi-setup"
+        "csi-gc"
         "nix-daemon"
-        "gc"
       ];
     };
     services.csi-setup = {
@@ -32,6 +32,23 @@
           ''
             #! ${pkgs.runtimeShell}
           '';
+    };
+    services.csi-gc = {
+      type = "scripted";
+      command =
+        pkgs.writeScriptBin "csi-gc" # bash
+          ''
+            #! ${pkgs.runtimeShell}
+            # Fix gcroots for /nix/var/result
+            nix build --out-link /nix/var/result /nix/var/result
+            # Collect old shit
+            ${lib.getExe pkgs.nix-timegc} 3600
+          '';
+      options = [ "shares-console" ];
+      depends-on = [
+        "nix-daemon"
+        "shared-setup"
+      ];
     };
   };
 }

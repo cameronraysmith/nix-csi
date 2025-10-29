@@ -18,6 +18,7 @@ self: pkgs: {
 
   nix-csi = self.csi-root.csi;
   nix-cache = self.csi-root.cache;
+  nix-timegc = self.csi-root.timegc;
   csi-root = pkgs.python3Packages.callPackage ../python {
     inherit (self) csi-proto-python kr8s;
   };
