@@ -3,6 +3,12 @@ nix-csi implements a CSI driver that populates a volume with the result of a nix
 
 AKA: A nix-snapshotter clone implemented on the CSI layer rather than the CRI layer.
 
+# Aplha software
+If you're curious about actually using this, please visit [cloud native
+nix](https://matrix.to/#/!VhbWwlUdjHkamKnfrK:nixos.org?via=nixos.org&via=matrix.
+org&via=nixos.dev) or hit me up directly at @lillecarl:matrix.org. I'm keen to
+hand-hold and learn from anyone who isn't localhost :))
+
 ## How to deploy
 
 ```bash
