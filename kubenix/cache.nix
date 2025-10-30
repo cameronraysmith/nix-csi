@@ -6,12 +6,12 @@ let
 in
 {
   options.nix-csi.cache = {
-    enable = lib.mkEnableOption "nix-cache";
     storageClassName = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
+      default = null;
     };
   };
-  config = lib.mkIf cfg.cache.enable {
+  config = {
     kubernetes.resources.${cfg.namespace} = {
       StatefulSet.nix-cache = {
         spec = {
@@ -60,27 +60,23 @@ in
                   volumeMounts = {
                     _namedlist = true;
                     nix-config.mountPath = "/etc/nix-mount";
+                    ssh.mountPath = "/etc/ssh-mount";
                     nix-store = {
                       mountPath = "/nix";
                       subPath = "nix";
                     };
-                  }
-                  // (lib.optionalAttrs cfg.cache.enable {
-                    ssh.mountPath = "/etc/ssh-mount";
-                  });
+                  };
                 };
               };
               volumes = {
                 _namedlist = true;
                 nix-config.configMap.name = "nix-cache-config";
-              }
-              // (lib.optionalAttrs cfg.cache.enable {
                 ssh.secret = {
                   secretName = "ssh";
                   defaultMode = 384;
                   optional = true;
                 };
-              });
+              };
             };
           };
           volumeClaimTemplates = [

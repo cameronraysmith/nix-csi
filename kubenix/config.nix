@@ -38,7 +38,7 @@ in
           "nix.conf" = # dinit
             ''
               ${sharedConfig}
-              max-jobs = auto
+              max-jobs = 0
             '';
         };
         ConfigMap.nix-csi-config.data = {
@@ -47,7 +47,7 @@ in
                 ${sharedConfig}
               # substituters
               extra-substituters = ssh-ng://nix@nix-cache?trusted=1&priority=20
-              max-jobs = 0
+              max-jobs = auto
             '';
           "nix-path.nix" = # nix
             ''

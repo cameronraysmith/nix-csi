@@ -43,7 +43,6 @@ in
                   securityContext.privileged = true;
                   env = {
                     _namedlist = true;
-                    BUILD_CACHE.value = lib.boolToString cfg.cache.enable;
                     CSI_ENDPOINT.value = "unix:///csi/csi.sock";
                     HOME.value = "/nix/var/nix-csi/root";
                     KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
@@ -59,6 +58,7 @@ in
                     csi-socket.mountPath = "/csi";
                     nix-config.mountPath = "/etc/nix";
                     registration.mountPath = "/registration";
+                    ssh.mountPath = "/etc/ssh-mount";
                     kubelet = {
                       mountPath = "/var/lib/kubelet";
                       mountPropagation = "Bidirectional";
@@ -68,10 +68,7 @@ in
                       mountPropagation = "Bidirectional";
                       subPath = "nix";
                     };
-                  }
-                  // (lib.optionalAttrs cfg.cache.enable {
-                    ssh.mountPath = "/etc/ssh-mount";
-                  });
+                  };
                 };
                 csi-node-driver-registrar = {
                   image = "registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0";
@@ -119,13 +116,11 @@ in
                   path = "/var/lib/kubelet";
                   type = "Directory";
                 };
-              }
-              // (lib.optionalAttrs cfg.cache.enable {
                 ssh.secret = {
                   secretName = "ssh";
                   defaultMode = 384;
                 };
-              });
+              };
             };
           };
         };

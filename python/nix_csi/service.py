@@ -392,8 +392,7 @@ class NodeServicer(csi_grpc.NodeBase):
         reply = csi_pb2.NodePublishVolumeResponse()
         await stream.send_message(reply)
 
-        if os.getenv("BUILD_CACHE") == "true":
-            asyncio.create_task(copyToCache(packagePath))
+        asyncio.create_task(copyToCache(packagePath))
 
     async def NodeUnpublishVolume(self, stream):
         request: csi_pb2.NodeUnpublishVolumeRequest | None = await stream.recv_message()
