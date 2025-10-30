@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-# Kinda AI slop but it works and I've done some manual cleanup to it
-
 import argparse
 import sqlite3
 import subprocess
@@ -17,66 +15,37 @@ def get_db_uri(db_path: Path) -> str:
     if os.geteuid() == 0:
         return f"file:{db_path}?mode=rwc&immutable=0"
     else:
-        # For non-root, first try a standard read-only connection.
         db_uri = f"file:{db_path}?mode=ro"
         try:
-            # Test the connection to see if it works without immutable.
-            # We need to run a query against a table to trigger wal and shm
-            # creation if the user has write permissions in the directory.
             with sqlite3.connect(db_uri, uri=True) as testConn:
                 testConn.execute("SELECT 1 FROM ValidPaths LIMIT 1;")
         except sqlite3.OperationalError:
-            # If the above fails, it's likely due to permissions.
-            # Fall back to an immutable connection which doesn't need to
-            # create temporary files.
             db_uri = f"file:{db_path}?mode=ro&immutable=1"
         return db_uri
 
 
-def get_dead_paths() -> list[str]:
-    """Get list of dead store paths from nix-store."""
-    print("Finding dead paths with 'nix-store --gc --print-dead'...")
-    result = subprocess.run(
-        ["nix-store", "--gc", "--print-dead"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return [line.strip() for line in result.stdout.splitlines()]
-
-
-def get_old_paths(conn: Connection, dead_paths: list[str], seconds: int) -> list[str]:
-    """Filter dead paths to those older than specified seconds."""
-    if not dead_paths:
-        return []
-
+def get_old_paths(conn: Connection, seconds: int) -> list[str]:
+    """Get store paths older than specified seconds from the Nix database."""
     cutoff_time = int((datetime.now() - timedelta(seconds=seconds)).timestamp())
-
     cursor = conn.cursor()
-    # Use a temporary table for performance with large numbers of dead paths.
-    cursor.execute("CREATE TEMP TABLE DeadPaths (path TEXT PRIMARY KEY)")
-    cursor.executemany("INSERT INTO DeadPaths VALUES (?)", [(p,) for p in dead_paths])
-
     cursor.execute(
         """
-        SELECT vp.path
-        FROM ValidPaths vp
-        INNER JOIN DeadPaths dp ON vp.path = dp.path
-        WHERE vp.registrationTime < ?
+        SELECT path
+        FROM ValidPaths
+        WHERE registrationTime < ?
         """,
         (cutoff_time,),
     )
-
     return [row[0] for row in cursor.fetchall()]
 
 
 def delete_paths(paths: list[str], dry_run: bool = False) -> None:
-    """Delete specified store paths."""
+    """Attempt to delete specified store paths."""
     if not paths:
         print("No old paths to delete.")
         return
 
-    action = "Would delete" if dry_run else "Deleting"
+    action = "Would delete" if dry_run else "Attempting to delete"
     print(f"{action} {len(paths)} paths...")
 
     if dry_run:
@@ -84,23 +53,32 @@ def delete_paths(paths: list[str], dry_run: bool = False) -> None:
             print(path)
         return
 
-    # Use nix-store --delete for the actual deletion
-    subprocess.run(
+    # Let nix-store handle checks for live GC roots.
+    # check=False allows the command to continue even if some paths are live.
+    result = subprocess.run(
         ["nix-store", "--delete", *paths],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
-    print(f"Successfully deleted {len(paths)} paths.")
+
+    if result.returncode != 0:
+        print(
+            "Deletion command finished with errors (some paths may still be live).",
+            file=sys.stderr,
+        )
+        print(f"Stderr:\n{result.stderr}", file=sys.stderr)
+    else:
+        print(f"Successfully processed {len(paths)} paths for deletion.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Delete dead Nix store paths older than a specified time.",
+        description="Delete Nix store paths older than a specified time.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "seconds", type=int, help="Delete paths older than this many seconds"
+        "seconds", type=int, help="Attempt to delete paths older than this many seconds"
     )
     parser.add_argument(
         "--dry-run",
@@ -117,12 +95,9 @@ def main() -> None:
         is_dry_run = args.dry_run or os.geteuid() != 0
 
         with sqlite3.connect(get_db_uri(db_path), uri=True) as conn:
-            dead_paths = get_dead_paths()
-            print(f"Found {len(dead_paths)} total dead paths.")
-
-            old_paths = get_old_paths(conn, dead_paths, args.seconds)
+            old_paths = get_old_paths(conn, args.seconds)
             print(
-                f"Found {len(old_paths)} dead paths older than {args.seconds} seconds."
+                f"Found {len(old_paths)} paths older than {args.seconds} seconds."
             )
 
             delete_paths(old_paths, is_dry_run)
