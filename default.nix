@@ -77,10 +77,7 @@ let
             nix-csi = {
               namespace = "nix-csi";
               image = imageRef;
-              cache = {
-                enable = true;
-                storageClassName = "local-path";
-              };
+              cache.storageClassName = "local-path";
               ctest = {
                 enable = true;
                 replicas = 1;
