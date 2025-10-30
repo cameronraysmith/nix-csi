@@ -238,7 +238,7 @@ on
         buildah config --env "PATH=/nix/var/result/bin" $container
         buildah commit $container ${scratchUrl on.pkgs.system}
         buildah push ${scratchUrl on.pkgs.system}
-        container=$(buildah from --platform linux/amd64 scratch)
+        container=$(buildah from --platform linux/arm64 scratch)
         buildah config --env "PATH=/nix/var/result/bin" $container
         buildah commit $container ${scratchUrl off.pkgs.system}
         buildah push ${scratchUrl off.pkgs.system}
