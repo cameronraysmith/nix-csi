@@ -32,7 +32,7 @@
         pkgs.writeScriptBin "cache-setup" # bash
           ''
             #! ${pkgs.runtimeShell}
-            rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/nix-mount/ /etc/nix/
+            rsync --archive --mkpath --copy-links --chmod=D700,F644 --chown=root:root /etc/nix-mount/ /etc/nix/
           '';
     };
     services.cache-gc = {
