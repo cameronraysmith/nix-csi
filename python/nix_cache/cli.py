@@ -5,6 +5,7 @@ import kr8s
 import time
 import argparse
 import logging
+import textwrap
 from pathlib import Path
 from nix_csi.subprocessing import run_captured, run_console
 
@@ -54,8 +55,63 @@ async def async_main():
     debounce_delay = 5  # seconds
     max_debounce_wait = 60  # seconds
 
-    # print("Performing initial IP fetch on startup...")
-    # await update_config(namespace)
+    privKey = Path("/nix/var/nix-csi/root/privkey")
+    pubKey = privKey.with_suffix(".pub")
+    if not privKey.exists():
+        await run_captured(
+            "ssh-keygen", "-t", "ed25519", "-f", privKey, "-N", "", "-C", "nix-csi"
+        )
+
+    stringData = {
+        # Keys
+        "id_ed25519": privKey.read_text(),
+        "id_ed25519.pub": pubKey.read_text(),
+        # Client config
+        "known_hosts": f"* {pubKey.read_text()}",
+        "config": textwrap.dedent("""
+            Host *
+                IdentityFile ~/.ssh/id_ed25519
+                UserKnownHostsFile ~/.ssh/known_hosts
+        """),
+        # Server config
+        "authorized_keys": pubKey.read_text(),
+        "sshd_config": textwrap.dedent("""
+            Port 22
+            AddressFamily Any
+
+            HostKey /etc/ssh/id_ed25519
+
+            SyslogFacility DAEMON
+            SetEnv PATH=/nix/var/result/bin
+            SetEnv NIXPKGS_ALLOW_UNFREE=1
+
+            PermitRootLogin no
+            PubkeyAuthentication yes
+            PasswordAuthentication no
+            ChallengeResponseAuthentication no
+            UsePAM no
+
+            AuthorizedKeysFile %h/.ssh/authorized_keys
+
+            StrictModes no
+
+            Subsystem sftp internal-sftp
+        """),
+    }
+
+    secret_manifest = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": "ssh", "namespace": namespace},
+        "stringData": stringData,
+        "type": "Opaque",
+    }
+    secret = await kr8s.asyncio.objects.Secret(secret_manifest)
+
+    if await secret.exists():
+        await secret.patch({"stringData": stringData})
+    else:
+        await secret.create()
 
     while True:
         try:

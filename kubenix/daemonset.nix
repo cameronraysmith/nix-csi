@@ -7,26 +7,6 @@ in
 {
   config = lib.mkIf cfg.enable {
     kubernetes.resources.${cfg.namespace} = {
-      # mounts to /nix/var/nix-csi/home/.ssh
-      Secret.sshc = lib.mkIf cfg.cache.enable {
-        stringData = {
-          known_hosts = ''
-            nix-cache ${builtins.readFile ../id_ed25519.pub}
-            * ${builtins.readFile ../id_ed25519.pub}
-          '';
-          id_ed25519 = builtins.readFile ../id_ed25519;
-          config = # ssh
-            ''
-              Host nix-cache
-                  HostName nix-cache
-                  User root
-                  Port 22
-                  IdentityFile ~/.ssh/id_ed25519
-                  UserKnownHostsFile ~/.ssh/known_hosts
-            '';
-        };
-      };
-
       DaemonSet.nix-csi-node = {
         spec = {
           updateStrategy = {
@@ -79,7 +59,6 @@ in
                     csi-socket.mountPath = "/csi";
                     nix-config.mountPath = "/etc/nix";
                     registration.mountPath = "/registration";
-                    sshd.mountPath = "/etc/ssh-mount";
                     kubelet = {
                       mountPath = "/var/lib/kubelet";
                       mountPropagation = "Bidirectional";
@@ -91,7 +70,7 @@ in
                     };
                   }
                   // (lib.optionalAttrs cfg.cache.enable {
-                    sshc.mountPath = "/etc/sshc";
+                    ssh.mountPath = "/etc/ssh-mount";
                   });
                 };
                 csi-node-driver-registrar = {
@@ -140,13 +119,12 @@ in
                   path = "/var/lib/kubelet";
                   type = "Directory";
                 };
-                sshd.secret = {
-                  secretName = "sshd";
-                  defaultMode = 384;
-                };
               }
               // (lib.optionalAttrs cfg.cache.enable {
-                sshc.secret.secretName = "sshc";
+                ssh.secret = {
+                  secretName = "ssh";
+                  defaultMode = 384;
+                };
               });
             };
           };

@@ -73,8 +73,9 @@ let
                   rsync --archive ${pkgs.dockerTools.binSh}/ /
                   rsync --archive ${pkgs.dockerTools.caCertificates}/ /
                   rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
-                  # Tricking OpenSSH's security policies, allow this to fail, sshc might not exist
-                  rsync --archive --copy-links --chmod=D700,F600 /etc/sshc/ $HOME/.ssh/ || true
+                  # Tricking OpenSSH's security policies
+                  # TODO: Only run this if we enable cache
+                  rsync --archive --copy-links --chmod=D700,F600 /etc/ssh-mount/ $HOME/.ssh/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/ssh-mount/ /etc/ssh/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
                 ''

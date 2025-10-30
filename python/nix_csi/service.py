@@ -79,6 +79,8 @@ async def set_nix_path():
     await try_console(
         "nix",
         "build",
+        "--max-jobs",
+        "auto",
         "--print-out-paths",
         "--file",
         "/etc/nix/nix-path.nix",
@@ -242,7 +244,9 @@ class NodeServicer(csi_grpc.NodeBase):
 
                         # Update packagePath when we've built it, required to
                         # prevent impure derivations from never "finalizing"
-                        packagePath = Path((await try_console(*buildCommand)).stdout.splitlines()[0])
+                        packagePath = Path(
+                            (await try_console(*buildCommand)).stdout.splitlines()[0]
+                        )
 
                         if packagePath.exists():
                             self.packagePathCache[expression] = packagePath

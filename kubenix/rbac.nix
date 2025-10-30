@@ -10,7 +10,6 @@ in
       ClusterRole.nix-csi = {
         rules = [
           {
-            # Read-only access to Pods and their logs in the core API group.
             apiGroups = [ "" ];
             resources = [
               "nodes"
@@ -20,6 +19,18 @@ in
               "get"
               "list"
               "watch"
+            ];
+          }
+          {
+            apiGroups = [ "" ];
+            resources = [
+              "secrets"
+            ];
+            verbs = [
+              "get"
+              "list"
+              "create"
+              "patch"
             ];
           }
         ];

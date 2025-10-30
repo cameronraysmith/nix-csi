@@ -13,34 +13,6 @@ in
   };
   config = lib.mkIf cfg.cache.enable {
     kubernetes.resources.${cfg.namespace} = {
-      # Mounts to /etc/ssh
-      Secret.sshd.stringData = {
-        authorized_keys = builtins.readFile ../id_ed25519.pub;
-        id_ed25519 = builtins.readFile ../id_ed25519;
-        sshd_config = # ssh
-          ''
-            Port 22
-            AddressFamily Any
-
-            HostKey /etc/ssh/id_ed25519
-
-            SyslogFacility DAEMON
-            SetEnv PATH=/nix/var/result/bin
-            SetEnv NIXPKGS_ALLOW_UNFREE=1
-
-            PermitRootLogin prohibit-password
-            PubkeyAuthentication yes
-            PasswordAuthentication no
-            ChallengeResponseAuthentication no
-            UsePAM no
-
-            AuthorizedKeysFile %h/.ssh/authorized_keys
-
-            StrictModes no
-
-            Subsystem sftp internal-sftp
-          '';
-      };
       StatefulSet.nix-cache = {
         spec = {
           serviceName = "nix-cache";
@@ -50,7 +22,6 @@ in
             metadata.labels.app = "nix-cache";
 
             metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-cache-config;
-            metadata.annotations.sshHash = hashAttrs nsRes.Secret.sshd;
             metadata.annotations.exprHash = hashAttrs nsRes.StatefulSet.nix-cache.spec.template.spec.volumes;
             spec = {
               serviceAccountName = "nix-csi";
@@ -89,27 +60,26 @@ in
                   volumeMounts = {
                     _namedlist = true;
                     nix-config.mountPath = "/etc/nix-mount";
-                    sshd.mountPath = "/etc/ssh-mount";
                     nix-store = {
                       mountPath = "/nix";
                       subPath = "nix";
                     };
                   }
                   // (lib.optionalAttrs cfg.cache.enable {
-                    sshc.mountPath = "/etc/sshc";
+                    ssh.mountPath = "/etc/ssh-mount";
                   });
                 };
               };
               volumes = {
                 _namedlist = true;
                 nix-config.configMap.name = "nix-cache-config";
-                sshd.secret = {
-                  secretName = "sshd";
-                  defaultMode = 384;
-                };
               }
               // (lib.optionalAttrs cfg.cache.enable {
-                sshc.secret.secretName = "sshc";
+                ssh.secret = {
+                  secretName = "ssh";
+                  defaultMode = 384;
+                  optional = true;
+                };
               });
             };
           };

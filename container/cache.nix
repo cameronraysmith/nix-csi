@@ -21,6 +21,9 @@
       depends-on = [ "cache-setup" ];
       depends-ms = [ "nix-daemon" ];
     };
+    # Make OpenSSH depend on cache-daemon so it can create the secret that'll
+    # be mounted into /etc/ssh-mount when it's crashed once.
+    services.openssh.waits-for = [ "cache-daemon" ];
     services.cache-setup = {
       type = "scripted";
       options = [ "shares-console" ];
