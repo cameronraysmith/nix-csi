@@ -1,0 +1,7 @@
+#! /usr/bin/env fish
+
+kubectl delete statefulset nix-cache --wait
+kubectl delete pvc nix-store-nix-cache-0
+kubectl delete deployment ctest --wait
+kubectl delete daemonset nix-csi-node --wait
+sudo rm -rf /var/lib/nix-csi
