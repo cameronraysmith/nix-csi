@@ -52,7 +52,6 @@ let
     inherit pkgs lib;
     n2c = import n2cSrc {
       inherit pkgs;
-      system = pkgs.system;
     };
     easykubenix =
       let
