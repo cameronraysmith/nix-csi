@@ -101,11 +101,6 @@ in
               targetPort = 22;
               name = "ssh";
             }
-            {
-              port = 80;
-              targetPort = 80;
-              name = "http";
-            }
           ];
           type = "ClusterIP";
         };

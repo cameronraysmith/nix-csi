@@ -2,58 +2,74 @@
 
 import asyncio
 import kr8s
-import time
 import argparse
 import logging
 import textwrap
 from pathlib import Path
-from nix_csi.subprocessing import run_captured, run_console
+from nix_csi.subprocessing import run_captured
 
 
 async def update_config(namespace: str):
-    """Fetches IPs and performs the update action."""
-    print("Debounce timer finished. Fetching IPs and updating config...")
+    """Fetches builder pod info and atomically updates the nix machines file."""
     try:
-        # 1. Get nodes with the specific label directly from the API
         builder_nodes = {
-            node.name
+            node.name: node
             async for node in kr8s.asyncio.get(
                 "nodes", label_selector="nix.csi/builder"
             )
         }
 
         if not builder_nodes:
-            print("No builder nodes found.")
-            return
+            logging.info("No builder nodes found, preparing to clear machines file.")
 
-        # 2. Get relevant pods and filter them
-        builder_ips = [
-            pod.status.podIP
-            async for pod in kr8s.asyncio.get(
-                "pods", namespace=namespace, label_selector={"app": "nix-csi-node"}
-            )
-            if pod.spec.nodeName in builder_nodes and pod.status.podIP
-        ]
+        arch_map = {
+            "amd64": "x86_64-linux",
+            "arm64": "aarch64-linux",
+        }
 
-        print(f"Discovered builder IPs: {builder_ips}")
+        builders = []
+        async for pod in kr8s.asyncio.get(
+            "pods", namespace=namespace, label_selector={"app": "nix-csi-node"}
+        ):
+            node_name = pod.spec.nodeName
+            if node := builder_nodes.get(node_name):
+                k8s_arch = node.metadata.labels.get("kubernetes.io/arch")
+                if not k8s_arch:
+                    logging.warning(
+                        f"Node '{node_name}' missing 'kubernetes.io/arch' label. Skipping pod '{pod.name}'."
+                    )
+                    continue
+
+                nix_arch = arch_map.get(k8s_arch)
+                if not nix_arch:
+                    logging.warning(
+                        f"Unhandled architecture '{k8s_arch}' for node '{node_name}'. Skipping pod '{pod.name}'."
+                    )
+                    continue
+
+                builders.append(
+                    f"ssh-ng://{pod.metadata['name']}.nix-builders.nix-csi.svc.ksb.lillecarl.com?trusted=1 {nix_arch}"
+                )
 
         machines_path = Path("/etc/nix/machines")
-        content = "".join(f"nix@{ip}?trusted=1\n" for ip in builder_ips)
-        machines_path.write_text(content)
-        await run_captured("dinitctl", "restart", "nix-daemon")
+        temp_path = machines_path.with_suffix(".tmp")
+        content = "".join(f"{builder}\n" for builder in builders)
+        temp_path.write_text(content)
+        temp_path.rename(machines_path)
+
+        logging.info(
+            f"Atomically updated {machines_path} with {len(builders)} builders."
+        )
+
     except kr8s.NotFoundError:
-        print("Resources not found, skipping update.")
-    except Exception as e:
-        print(f"An error occurred during update: {e}")
+        logging.warning("Resources not found, skipping update.")
+    except Exception:
+        logging.exception("An error occurred during update.")
 
 
 async def async_main():
     namespace = "nix-csi"
     label_selector = {"app": "nix-csi-node"}
-    debounce_task = None
-    first_event_time = None
-    debounce_delay = 5  # seconds
-    max_debounce_wait = 60  # seconds
 
     privKey = Path("/nix/var/nix-csi/root/privkey")
     pubKey = privKey.with_suffix(".pub")
@@ -63,40 +79,35 @@ async def async_main():
         )
 
     stringData = {
-        # Keys
         "id_ed25519": privKey.read_text(),
         "id_ed25519.pub": pubKey.read_text(),
-        # Client config
         "known_hosts": f"* {pubKey.read_text()}",
-        "config": textwrap.dedent("""
+        "config": textwrap.dedent(
+            """
             Host *
                 IdentityFile ~/.ssh/id_ed25519
                 UserKnownHostsFile ~/.ssh/known_hosts
-        """),
-        # Server config
+        """
+        ),
         "authorized_keys": pubKey.read_text(),
-        "sshd_config": textwrap.dedent("""
+        "sshd_config": textwrap.dedent(
+            """
             Port 22
             AddressFamily Any
-
             HostKey /etc/ssh/id_ed25519
-
             SyslogFacility DAEMON
             SetEnv PATH=/nix/var/result/bin
             SetEnv NIXPKGS_ALLOW_UNFREE=1
-
             PermitRootLogin no
             PubkeyAuthentication yes
             PasswordAuthentication no
             ChallengeResponseAuthentication no
             UsePAM no
-
             AuthorizedKeysFile %h/.ssh/authorized_keys
-
             StrictModes no
-
             Subsystem sftp internal-sftp
-        """),
+        """
+        ),
     }
 
     secret_manifest = {
@@ -113,62 +124,31 @@ async def async_main():
     else:
         await secret.create()
 
+    # No need to do this since watch will trigger added straight away for some reason
+    # logging.info("Performing initial configuration update on startup.")
+    # await update_config(namespace)
+
+    logging.info(
+        f"Watching for pod events in namespace '{namespace}' with selector '{label_selector}'..."
+    )
     while True:
         try:
-            async for event in kr8s.asyncio.watch(
+            async for event_type, obj in kr8s.asyncio.watch(
                 "pods", namespace=namespace, label_selector=label_selector
             ):
-                if event[0] not in ["ADDED", "DELETED"]:
+                if event_type not in ["ADDED", "DELETED"]:
                     continue
 
-                now = time.monotonic()
-
-                if first_event_time is None:
-                    first_event_time = now
-
-                if debounce_task:
-                    debounce_task.cancel()
-
-                # Force execution if max wait time is exceeded
-                if now - first_event_time >= max_debounce_wait:
-                    print(
-                        f"Max debounce time of {max_debounce_wait}s reached. Forcing update."
-                    )
-                    await update_config(namespace)
-                    # Reset state for the next series of events
-                    first_event_time = None
-                    debounce_task = None
-                    continue
-
-                # Otherwise, schedule the normal debounced update
-                print(
-                    f"Pod event '{event[0]}' detected for {event[1].name}. Resetting debounce timer."
+                logging.info(
+                    f"Pod event '{event_type}' for {obj.name}. Triggering update."
                 )
-
-                async def debounced_run():
-                    nonlocal first_event_time, debounce_task
-                    try:
-                        await asyncio.sleep(debounce_delay)
-                        await update_config(namespace)
-                        # Reset state after a successful debounced run
-                        first_event_time = None
-                        debounce_task = None
-                    except asyncio.CancelledError:
-                        # This is expected if another event arrives
-                        pass
-
-                debounce_task = asyncio.create_task(debounced_run())
+                await update_config(namespace)
 
         except asyncio.CancelledError:
-            print("Main task cancelled, shutting down.")
+            logging.info("Main task cancelled, shutting down.")
             break
-        except Exception as e:
-            print(f"Kubernetes API error: {e}. Retrying in 15 seconds...")
-            # Reset state on error to avoid stale timers after reconnect
-            if debounce_task:
-                debounce_task.cancel()
-            debounce_task = None
-            first_event_time = None
+        except Exception:
+            logging.exception("Kubernetes API watch error. Retrying in 15 seconds...")
             await asyncio.sleep(15)
 
 
@@ -186,14 +166,11 @@ def parse_args():
 def main():
     args = parse_args()
     logging.basicConfig(
-        level=logging.WARN,
+        level=logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
-    logger = logging.getLogger("nix-csi")
-    loglevel_str = logging.getLevelName(logger.getEffectiveLevel())
-    logger.info(f"Current log level: {loglevel_str}")
-
     logging.getLogger("nix-csi").setLevel(getattr(logging, args.loglevel))
+
     try:
         asyncio.run(async_main())
     except KeyboardInterrupt:

@@ -68,14 +68,16 @@ let
                       ]
                     )
                   }
-                  mkdir --parents /tmp
-                  mkdir --parents /var/log
+                  mkdir --parents {/tmp,/var/tmp}
+                  chmod -R 1777 {/tmp,/var/tmp}
+                  mkdir --parents {/var/log}
+                  chmod -R 0755 {/var/log}
                   rsync --archive ${pkgs.dockerTools.binSh}/ /
                   rsync --archive ${pkgs.dockerTools.caCertificates}/ /
                   rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
                   # Tricking OpenSSH's security policies
-                  # TODO: Only run this if we enable cache
-                  rsync --archive --copy-links --chmod=D700,F600 /etc/ssh-mount/ $HOME/.ssh/
+                  # TODO: Only run this if we enable cache?
+                  rsync --archive --mkpath --copy-links --chmod=D700,F600 --exclude='authorized_keys' /etc/ssh-mount/ $HOME/.ssh/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/ssh-mount/ /etc/ssh/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
                 ''
@@ -96,7 +98,9 @@ let
             pkgs.lix
           ]
         }:$PATH
-        nix copy --store local --to /nix-volume --no-check-sigs $(nix path-info --store local --all)
+        # Copy entire entire container image into volume
+        nix path-info --store local --all | nix copy --store local --to /nix-volume --no-check-sigs --stdin
+        # Link /nix/var/result properly so it doesn't get GC'd
         nix build --store /nix-volume --out-link /nix-volume/nix/var/result ${pathEnv}
       '';
   pathEnv = pkgs.buildEnv {
@@ -111,6 +115,7 @@ let
       util-linuxMinimal
       gnugrep
       getent
+      doggo
     ];
   };
 in
