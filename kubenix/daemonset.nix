@@ -57,7 +57,7 @@ in
                   volumeMounts = {
                     _namedlist = true;
                     csi-socket.mountPath = "/csi";
-                    nix-config.mountPath = "/etc/nix";
+                    nix-config.mountPath = "/etc/nix-mount";
                     registration.mountPath = "/registration";
                     ssh.mountPath = "/etc/ssh-mount";
                     kubelet = {

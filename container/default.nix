@@ -49,10 +49,45 @@ let
             command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store local";
             depends-on = [ "shared-setup" ];
           };
+          services.config-reconciler = {
+            type = "process";
+            options = [ "shares-console" ];
+            command =
+              pkgs.writeScriptBin "config-reconciler" # bash
+                ''
+                  #! ${pkgs.runtimeShell}
+                  set -euo pipefail
+                  set -x
+                  export PATH=${
+                    lib.makeBinPath [
+                      pkgs.rsync
+                      pkgs.coreutils
+                    ]
+                  }
+                  while true
+                  do
+                    # Tricking OpenSSH's security policies like a pro!
+                    #
+                    # Exclude authorized_keys from root, we don't want anyone
+                    # logging in as root in our containers.
+                    rsync --archive --mkpath --copy-links --chmod=D700,F600 --exclude='authorized_keys' /etc/ssh-mount/ $HOME/.ssh/
+                    # Here authorized_keys don't matter since we only check %h
+                    # for authorized_keys in sshd config
+                    rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/ssh-mount/ /etc/ssh/
+                    # Everyone should log in as Nix to build or substitute
+                    rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
+                    # Copy mounted Nix config to nix config dir
+                    rsync --archive --mkpath --copy-links --chmod=D755,F644 --chown=root:root /etc/nix-mount/ /etc/nix/
+                    # 60s reconciliation is good enough
+                    sleep 60
+                  done
+                '';
+          };
           services.shared-setup = {
             type = "scripted";
             options = [ "shares-console" ];
-            command = lib.getExe (
+            depends-on = [ "config-reconciler" ];
+            command =
               pkgs.writeScriptBin "shared-setup" # bash
                 ''
                   #! ${pkgs.runtimeShell}
@@ -75,13 +110,16 @@ let
                   rsync --archive ${pkgs.dockerTools.binSh}/ /
                   rsync --archive ${pkgs.dockerTools.caCertificates}/ /
                   rsync --archive ${pkgs.dockerTools.usrBinEnv}/ /
-                  # Tricking OpenSSH's security policies
-                  # TODO: Only run this if we enable cache?
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --exclude='authorized_keys' /etc/ssh-mount/ $HOME/.ssh/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/ssh-mount/ /etc/ssh/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
-                ''
-            );
+                  # Fix gcroots for /nix/var/result. The ones created by initCopy
+                  # points to invalid symlinks in the chain
+                  # (auto -> /nix-volume/var/result) rather than
+                  # auto -> /nix/var/result. The link back to store works though
+                  # so this will just fix gcroots.
+                  nix build --store local --out-link /nix/var/result /nix/var/result
+                '';
           };
         };
       }

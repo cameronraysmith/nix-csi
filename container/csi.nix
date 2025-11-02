@@ -18,20 +18,10 @@
       command = "${lib.getExe pkgs.nix-csi} --loglevel DEBUG";
       options = [ "shares-console" ];
       depends-on = [
-        "csi-setup"
+        "shared-setup"
         "csi-gc"
         "nix-daemon"
       ];
-    };
-    services.csi-setup = {
-      type = "scripted";
-      options = [ "shares-console" ];
-      depends-on = [ "shared-setup" ];
-      command =
-        pkgs.writeScriptBin "csi-setup" # bash
-          ''
-            #! ${pkgs.runtimeShell}
-          '';
     };
     services.csi-gc = {
       type = "scripted";
