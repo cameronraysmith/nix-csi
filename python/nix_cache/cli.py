@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 
 import asyncio
+import os
 import kr8s
 import argparse
 import logging
@@ -9,7 +10,7 @@ from pathlib import Path
 from nix_csi.subprocessing import run_captured
 
 
-async def update_config(namespace: str):
+async def update_machines(namespace: str):
     """Fetches builder pod info and atomically updates the nix machines file."""
     try:
         builder_nodes = {
@@ -22,9 +23,13 @@ async def update_config(namespace: str):
         if not builder_nodes:
             logging.info("No builder nodes found, preparing to clear machines file.")
 
+        # These are supposedly supported by Kubernetes
         arch_map = {
             "amd64": "x86_64-linux",
+            "arm": "armv7l-linux",
             "arm64": "aarch64-linux",
+            "ppc64le": "powerpc64le-linux",
+            "s390x": "s390x-linux",
         }
 
         builders = []
@@ -67,67 +72,9 @@ async def update_config(namespace: str):
         logging.exception("An error occurred during update.")
 
 
-async def async_main():
-    namespace = "nix-csi"
+async def watch_pods_and_update_config(namespace: str):
+    """Watches for pod events and triggers config updates."""
     label_selector = {"app": "nix-csi-node"}
-
-    privKey = Path("/nix/var/nix-csi/root/privkey")
-    pubKey = privKey.with_suffix(".pub")
-    if not privKey.exists():
-        await run_captured(
-            "ssh-keygen", "-t", "ed25519", "-f", privKey, "-N", "", "-C", "nix-csi"
-        )
-
-    stringData = {
-        "id_ed25519": privKey.read_text(),
-        "id_ed25519.pub": pubKey.read_text(),
-        "known_hosts": f"* {pubKey.read_text()}",
-        "config": textwrap.dedent(
-            """
-            Host *
-                IdentityFile ~/.ssh/id_ed25519
-                UserKnownHostsFile ~/.ssh/known_hosts
-        """
-        ),
-        "authorized_keys": pubKey.read_text(),
-        "sshd_config": textwrap.dedent(
-            """
-            Port 22
-            AddressFamily Any
-            HostKey /etc/ssh/id_ed25519
-            SyslogFacility DAEMON
-            SetEnv PATH=/nix/var/result/bin
-            SetEnv NIXPKGS_ALLOW_UNFREE=1
-            PermitRootLogin no
-            PubkeyAuthentication yes
-            PasswordAuthentication no
-            ChallengeResponseAuthentication no
-            UsePAM no
-            AuthorizedKeysFile %h/.ssh/authorized_keys
-            StrictModes no
-            Subsystem sftp internal-sftp
-        """
-        ),
-    }
-
-    secret_manifest = {
-        "apiVersion": "v1",
-        "kind": "Secret",
-        "metadata": {"name": "ssh", "namespace": namespace},
-        "stringData": stringData,
-        "type": "Opaque",
-    }
-    secret = await kr8s.asyncio.objects.Secret(secret_manifest)
-
-    if await secret.exists():
-        await secret.patch({"stringData": stringData})
-    else:
-        await secret.create()
-
-    # No need to do this since watch will trigger added straight away for some reason
-    # logging.info("Performing initial configuration update on startup.")
-    # await update_config(namespace)
-
     logging.info(
         f"Watching for pod events in namespace '{namespace}' with selector '{label_selector}'..."
     )
@@ -142,14 +89,102 @@ async def async_main():
                 logging.info(
                     f"Pod event '{event_type}' for {obj.name}. Triggering update."
                 )
-                await update_config(namespace)
+                await update_machines(namespace)
 
         except asyncio.CancelledError:
-            logging.info("Main task cancelled, shutting down.")
+            logging.info("Pod watcher task cancelled.")
             break
         except Exception:
             logging.exception("Kubernetes API watch error. Retrying in 15 seconds...")
             await asyncio.sleep(15)
+
+
+async def reconcile_secrets(namespace: str, privKey: Path, pubKey: Path):
+    """Periodically ensures the SSH secret is up-to-date."""
+    while True:
+        try:
+            logging.info("Reconciling SSH secret...")
+            authorized_keys_cm = await kr8s.asyncio.objects.ConfigMap.get(
+                name="authorized-keys", namespace=namespace
+            )
+            keys = [pubKey.read_text().strip()] + str(
+                authorized_keys_cm.data.get("authorized_keys", "")
+            ).strip().splitlines()
+
+            stringData = {
+                "id_ed25519": privKey.read_text(),
+                "id_ed25519.pub": pubKey.read_text(),
+                "known_hosts": f"* {pubKey.read_text()}",
+                "config": textwrap.dedent(
+                    """
+                    Host *
+                        IdentityFile ~/.ssh/id_ed25519
+                        UserKnownHostsFile ~/.ssh/known_hosts
+                """
+                ),
+                "authorized_keys": "\n".join(keys) + "\n",
+                "sshd_config": textwrap.dedent(
+                    """
+                    Port 22
+                    AddressFamily Any
+                    HostKey /etc/ssh/id_ed25519
+                    SyslogFacility DAEMON
+                    SetEnv PATH=/nix/var/result/bin
+                    SetEnv NIXPKGS_ALLOW_UNFREE=1
+                    PermitRootLogin no
+                    PubkeyAuthentication yes
+                    PasswordAuthentication no
+                    ChallengeResponseAuthentication no
+                    UsePAM no
+                    AuthorizedKeysFile %h/.ssh/authorized_keys
+                    StrictModes no
+                    Subsystem sftp internal-sftp
+                """
+                ),
+            }
+
+            secret_manifest = {
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": {"name": "ssh", "namespace": namespace},
+                "stringData": stringData,
+                "type": "Opaque",
+            }
+            secret = await kr8s.asyncio.objects.Secret(secret_manifest)
+
+            if await secret.exists():
+                await secret.patch({"stringData": stringData})
+                logging.info("Patched existing SSH secret.")
+            else:
+                await secret.create()
+                logging.info("Created new SSH secret.")
+
+            await asyncio.sleep(60)
+
+        except asyncio.CancelledError:
+            logging.info("Secret reconciler task cancelled.")
+            break
+        except Exception:
+            logging.exception("Error reconciling secret. Retrying in 15 seconds...")
+            await asyncio.sleep(15)
+
+
+async def async_main():
+    namespace = os.environ["KUBE_NAMESPACE"]
+
+    privKey = Path("/nix/var/nix-csi/root/privkey")
+    pubKey = privKey.with_suffix(".pub")
+    if not privKey.exists():
+        await run_captured(
+            "ssh-keygen", "-t", "ed25519", "-f", privKey, "-N", "", "-C", "nix-csi"
+        )
+
+    pod_watcher_task = asyncio.create_task(watch_pods_and_update_config(namespace))
+    secret_reconciler_task = asyncio.create_task(
+        reconcile_secrets(namespace, privKey, pubKey)
+    )
+
+    await asyncio.gather(pod_watcher_task, secret_reconciler_task)
 
 
 def parse_args():

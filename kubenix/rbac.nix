@@ -9,6 +9,7 @@ in
 
       ClusterRole.nix-csi = {
         rules = [
+          # Cache maintains up2date /etc/nix/machines
           {
             apiGroups = [ "" ];
             resources = [
@@ -21,6 +22,7 @@ in
               "watch"
             ];
           }
+          # ssh secret, CRUD
           {
             apiGroups = [ "" ];
             resources = [
@@ -31,6 +33,17 @@ in
               "list"
               "create"
               "patch"
+            ];
+          }
+          # Read authorized-keys
+          {
+            apiGroups = [ "" ];
+            resources = [
+              "configmaps"
+            ];
+            verbs = [
+              "get"
+              "list"
             ];
           }
         ];

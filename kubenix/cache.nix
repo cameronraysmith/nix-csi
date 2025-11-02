@@ -13,6 +13,7 @@ in
   };
   config = {
     kubernetes.resources.${cfg.namespace} = {
+      ConfigMap.authorized-keys.data.authorized_keys = lib.concatLines cfg.authorizedKeys;
       StatefulSet.nix-cache = {
         spec = {
           serviceName = "nix-cache";
@@ -45,12 +46,11 @@ in
                     "cache"
                   ];
                   image = "quay.io/nix-csi/scratch:1.0.1";
-                  env = [
-                    {
-                      name = "HOME";
-                      value = "/nix/var/nix-csi/root";
-                    }
-                  ];
+                  env = {
+                    _namedlist = true;
+                    HOME.value = "/nix/var/nix-csi/root";
+                    KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
+                  };
                   ports = [
                     {
                       containerPort = 80;

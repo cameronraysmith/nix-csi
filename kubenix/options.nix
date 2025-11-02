@@ -14,6 +14,11 @@
       type = lib.types.str;
       default = "default";
     };
+    authorizedKeys = lib.mkOption {
+      description = "SSH public keys that can connect to cache and builders";
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+    };
     image = lib.mkOption {
       type = lib.types.str;
       default =

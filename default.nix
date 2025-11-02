@@ -78,6 +78,9 @@ let
               namespace = "nix-csi";
               image = imageRef;
               cache.storageClassName = "local-path";
+              authorizedKeys = [
+                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAHZ3pA0vIXiKQuwfM1ks8TipeOxfDT9fgo4xMi9iiWr lillecarl@lillecarl.com"
+              ];
               ctest = {
                 enable = true;
                 replicas = 1;
@@ -142,14 +145,6 @@ let
     deploy =
       pkgs.writers.writeFishBin "deploy" # fish
         ''
-          # # Generate binary cache keys
-          # if ! test -f ./cache-secret || ! test -f ./cache-public
-          #     nix-store --generate-binary-cache-key nix-csi-cache-1 ./cache-secret ./cache-public
-          # end
-          # # Generate ssh keys
-          # if ! test -f ./id_ed25519 || ! test -f ./id_ed25519.pub
-          #     ssh-keygen -t ed25519 -f ./id_ed25519 -C nix-cache -N ""
-          # end
           # Build container image
           nix run --file . imageToContainerd || begin
               echo "DaemonSet image failed"
