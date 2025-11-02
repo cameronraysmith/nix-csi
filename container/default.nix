@@ -57,7 +57,6 @@ let
                 ''
                   #! ${pkgs.runtimeShell}
                   set -euo pipefail
-                  set -x
                   export PATH=${
                     lib.makeBinPath [
                       pkgs.rsync
@@ -76,9 +75,11 @@ let
                     rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/ssh-mount/ /etc/ssh/
                     # Everyone should log in as Nix to build or substitute
                     rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
+
                     # Copy mounted Nix config to nix config dir
+                    # (Need RW /etc/nix for writing machines file)
                     rsync --archive --mkpath --copy-links --chmod=D755,F644 --chown=root:root /etc/nix-mount/ /etc/nix/
-                    # 60s reconciliation is good enough
+                    # 60s reconciliation is good enough(TM)
                     sleep 60
                   done
                 '';
