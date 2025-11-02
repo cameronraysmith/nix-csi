@@ -50,7 +50,7 @@ up your root ssh config appropriately:
 Host nixcachelbip
   User nix
   IdentityFile /tmp/id_ed25519
-Host *.nix-builders.namespace.svc.cluster.local
+Host *.nix-builders
   HostName %h
   User nix
   IdentityFile /tmp/id_ed25519
