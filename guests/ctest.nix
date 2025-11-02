@@ -81,4 +81,12 @@ let
     meta.mainProgram = "big-binary";
   };
 in
-dinixEval.config.containerWrapper
+pkgs.buildEnv {
+  name = "ctestenv";
+  paths = [
+    dinixEval.config.containerWrapper
+    pkgs.fish
+    pkgs.lix
+    pkgs.coreutils
+  ];
+}
