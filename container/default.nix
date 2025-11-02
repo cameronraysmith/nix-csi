@@ -154,6 +154,8 @@ let
       gnugrep
       getent
       doggo
+      iputils
+      curl
     ];
   };
 in
