@@ -77,7 +77,7 @@ let
             cgroup.hostPath.path = "/sys/fs/cgroup";
             nix.csi = {
               driver = "nix.csi.store";
-              volumeAttributes.${pkgs.system} = pkgs.buildEnv {
+              volumeAttributes.${pkgs.stdenv.hostPlatform.system} = pkgs.buildEnv {
                 name = "initenv";
                 paths = [
                   pkgs.fish

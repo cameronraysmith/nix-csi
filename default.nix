@@ -205,16 +205,16 @@ on
         }
         trap cleanup EXIT
         # Build and publish nix-csi image(s)
-        ${lib.getExe on.image.copyTo} oci-archive:$buildDir/csi-${on.pkgs.system}:${csiUrl on.pkgs.system}
-        ${lib.getExe off.image.copyTo} oci-archive:$buildDir/csi-${off.pkgs.system}:${csiUrl off.pkgs.system}
-        podman load --input $buildDir/csi-${on.pkgs.system}
-        podman load --input $buildDir/csi-${off.pkgs.system}
-        podman push ${csiUrl on.pkgs.system}
-        podman push ${csiUrl off.pkgs.system}
+        ${lib.getExe on.image.copyTo} oci-archive:$buildDir/csi-${on.pkgs.stdenv.hostPlatform.system}:${csiUrl on.pkgs.stdenv.hostPlatform.system}
+        ${lib.getExe off.image.copyTo} oci-archive:$buildDir/csi-${off.pkgs.stdenv.hostPlatform.system}:${csiUrl off.pkgs.stdenv.hostPlatform.system}
+        podman load --input $buildDir/csi-${on.pkgs.stdenv.hostPlatform.system}
+        podman load --input $buildDir/csi-${off.pkgs.stdenv.hostPlatform.system}
+        podman push ${csiUrl on.pkgs.stdenv.hostPlatform.system}
+        podman push ${csiUrl off.pkgs.stdenv.hostPlatform.system}
         podman manifest rm ${csiManifest} &>/dev/null || true
         podman manifest create ${csiManifest}
-        podman manifest add ${csiManifest} ${csiUrl on.pkgs.system}
-        podman manifest add ${csiManifest} ${csiUrl off.pkgs.system}
+        podman manifest add ${csiManifest} ${csiUrl on.pkgs.stdenv.hostPlatform.system}
+        podman manifest add ${csiManifest} ${csiUrl off.pkgs.stdenv.hostPlatform.system}
         podman manifest push ${csiManifest}
       '';
   uploadScratch =
@@ -231,16 +231,16 @@ on
         # Build and publish scratch image(s)
         container=$(buildah from --platform linux/amd64 scratch)
         buildah config --env "PATH=/nix/var/result/bin" $container
-        buildah commit $container ${scratchUrl on.pkgs.system}
-        buildah push ${scratchUrl on.pkgs.system}
+        buildah commit $container ${scratchUrl on.pkgs.stdenv.hostPlatform.system}
+        buildah push ${scratchUrl on.pkgs.stdenv.hostPlatform.system}
         container=$(buildah from --platform linux/arm64 scratch)
         buildah config --env "PATH=/nix/var/result/bin" $container
-        buildah commit $container ${scratchUrl off.pkgs.system}
-        buildah push ${scratchUrl off.pkgs.system}
+        buildah commit $container ${scratchUrl off.pkgs.stdenv.hostPlatform.system}
+        buildah push ${scratchUrl off.pkgs.stdenv.hostPlatform.system}
         buildah manifest rm ${scratchManifest} &>/dev/null || true
         buildah manifest create ${scratchManifest}
-        buildah manifest add ${scratchManifest} ${scratchUrl on.pkgs.system}
-        buildah manifest add ${scratchManifest} ${scratchUrl off.pkgs.system}
+        buildah manifest add ${scratchManifest} ${scratchUrl on.pkgs.stdenv.hostPlatform.system}
+        buildah manifest add ${scratchManifest} ${scratchUrl off.pkgs.stdenv.hostPlatform.system}
         buildah manifest push ${scratchManifest}
       '';
 }

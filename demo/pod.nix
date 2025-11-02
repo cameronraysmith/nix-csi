@@ -41,8 +41,8 @@ let
             _namedlist = true;
             nix.csi = {
               driver = "nix.csi.store";
-              volumeAttributes.${pkgs.system} = pkgs.hello; # this is stringified into a storepath,
-              volumeAttributes.${pkgsCrossish.system} = pkgsCrossish.hello; # this is stringified into a storepath,
+              volumeAttributes.${pkgs.stdenv.hostPlatform.system} = pkgs.hello; # this is stringified into a storepath,
+              volumeAttributes.${pkgsCrossish.stdenv.hostPlatform.system} = pkgsCrossish.hello; # this is stringified into a storepath,
               # Now the manifest depends on pkgs.hello so when we push it we bring pkgs.hello and nix-csi can fetch it.
             };
           };
