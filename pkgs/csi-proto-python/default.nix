@@ -1,3 +1,4 @@
+# Credits to Claude Sonnet 3.7
 {
   lib,
   buildPythonPackage,
@@ -25,45 +26,22 @@ buildPythonPackage {
 
   src = ./.;
 
-  # src = fetchFromGitHub {
-  #   owner = "container-storage-interface";
-  #   repo = "spec";
-  #   rev = "v${version}"; # Update as needed
-  #   sha256 = "sha256-mDvlHB2vVqJIQO6y2UJlDohzHUbCvzJ9hJc7XFAbFb0=";
-  # };
-
-  # src = ../../../spec;
-
-  buildInputs = [
-    # protobuf
-    # mypy-protobuf
-    # grpcio-tools
-  ];
+  buildInputs = [ ];
 
   nativeBuildInputs = [
-    # protobuf
     grpclib
     mypy-protobuf
     grpcio-tools
   ];
 
   propagatedBuildInputs = [
-    # protobuf
     grpclib
-    # grpcio
     mypy-protobuf
   ];
 
-  # There's no setup.py, so we use a custom buildPhase and installPhase
   format = "pyproject";
   preBuild = ''
     mkdir -p src/csi
-    # python -m grpc_tools.protoc \
-    #   --proto_path="${spec}" \
-    #   --python_out="src/csi" \
-    #   --grpc_python_out="src/csi" \
-    #   --mypy_out="src/csi" \
-    #   csi.proto
     protoc \
       --proto_path="${spec}" \
       --python_out="src/csi" \
