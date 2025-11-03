@@ -10,6 +10,10 @@ in
       type = lib.types.nullOr lib.types.str;
       default = null;
     };
+    loadBalancerPort = lib.mkOption {
+      type = lib.types.int;
+      default = 2222;
+    };
   };
   config = {
     kubernetes.resources.${cfg.namespace} = {
@@ -108,18 +112,13 @@ in
       Service.nix-cache-lb = {
         spec = {
           selector.app = "nix-cache";
-          ports = [
-            {
-              port = 22;
+          ports = {
+            _namedlist = true;
+            ssh = {
+              port = cfg.cache.loadBalancerPort;
               targetPort = 22;
-              name = "ssh";
-            }
-            {
-              port = 80;
-              targetPort = 80;
-              name = "http";
-            }
-          ];
+            };
+          };
           type = "LoadBalancer";
         };
       };
