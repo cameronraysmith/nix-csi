@@ -1,10 +1,7 @@
 { lib, ... }:
 {
   options.nix-csi = {
-    enable = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-    };
+    enable = lib.mkEnableOption "nix-csi";
     undeploy = lib.mkOption {
       type = lib.types.bool;
       default = false;

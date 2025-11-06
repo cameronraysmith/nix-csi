@@ -37,5 +37,4 @@ self: pkgs: {
   csi-proto-python = pkgs.python3Packages.callPackage ./csi-proto-python { };
   python-jsonpath = pkgs.python3Packages.callPackage ./python-jsonpath.nix { };
   kr8s = pkgs.python3Packages.callPackage ./kr8s.nix { inherit (self) python-jsonpath; };
-
 }

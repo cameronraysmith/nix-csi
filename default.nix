@@ -75,6 +75,7 @@ let
         {
           config = {
             nix-csi = {
+              enable = true;
               namespace = "nix-csi";
               image = imageRef;
               cache.storageClassName = "local-path";
