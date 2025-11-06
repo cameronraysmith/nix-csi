@@ -41,7 +41,16 @@ let
           };
           services.openssh = {
             type = "process";
-            command = "${lib.getExe' pkgs.openssh "sshd"} -D -f /etc/ssh/sshd_config -e";
+            command =
+              pkgs.writeScriptBin "openssh-launcher" # bash
+                ''
+                  #! ${pkgs.runtimeShell}
+                  for i in $(seq 1 10); do
+                    test -f /etc/ssh/sshd_config && break
+                    sleep 1
+                  done
+                  ${lib.getExe' pkgs.openssh "sshd"} -D -f /etc/ssh/sshd_config -e
+                '';
             options = [ "shares-console" ];
             depends-on = [ "shared-setup" ];
           };
