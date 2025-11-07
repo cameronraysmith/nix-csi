@@ -54,7 +54,7 @@ async def update_machines(namespace: str):
 
                 # Cluster internal DNS search-domain will sort out the full name
                 builders.append(
-                    f"ssh-ng://{pod.metadata['name']}.nix-builders?trusted=1 {nix_arch}"
+                    f"ssh-ng://{pod.metadata['name']}.{os.environ['BUILDERS_SERVICE_NAME']}?trusted=1 {nix_arch}"
                 )
 
         machines_path = Path("/etc/nix/machines")

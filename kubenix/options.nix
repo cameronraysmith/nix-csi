@@ -31,5 +31,12 @@
       type = lib.types.path;
       default = "/var/lib/nix-csi";
     };
+    internalServiceName = lib.mkOption {
+      description = ''
+        Internal service name used for reaching builder nodes from cache node
+      '';
+      type = lib.types.str;
+      default = "nix-builders";
+    };
   };
 }

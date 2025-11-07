@@ -54,6 +54,7 @@ in
                     _namedlist = true;
                     HOME.value = "/nix/var/nix-csi/root";
                     KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
+                    BUILDERS_SERVICE_NAME.value = cfg.internalServiceName;
                   };
                   ports = [
                     {

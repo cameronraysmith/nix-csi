@@ -20,7 +20,7 @@ in
             metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-cache-config;
             spec = {
               serviceAccountName = "nix-csi";
-              subdomain = "nix-builders";
+              subdomain = cfg.internalServiceName;
               initContainers = [
                 {
                   name = "initcopy";
@@ -127,7 +127,7 @@ in
         };
       };
       # DNS for pods
-      Service.nix-builders.spec = {
+      Service.${cfg.internalServiceName}.spec = {
         clusterIP = "None";
         selector.app = "nix-csi-node";
         ports = [
