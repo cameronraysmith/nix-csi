@@ -23,13 +23,9 @@ async def update_machines(namespace: str):
         if not builder_nodes:
             logging.info("No builder nodes found, preparing to clear machines file.")
 
-        # These are supposedly supported by Kubernetes
         arch_map = {
             "amd64": "x86_64-linux",
-            "arm": "armv7l-linux",
             "arm64": "aarch64-linux",
-            "ppc64le": "powerpc64le-linux",
-            "s390x": "s390x-linux",
         }
 
         builders = []
@@ -73,8 +69,18 @@ async def update_machines(namespace: str):
         logging.exception("An error occurred during update.")
 
 
-async def watch_pods_and_update_config(namespace: str):
-    """Watches for pod events and triggers config updates."""
+async def update_worker(update_event: asyncio.Event, namespace: str):
+    """Waits for an update signal, debounces, and runs the update."""
+    while True:
+        await update_event.wait()
+        update_event.clear()
+        logging.info("Change detected. Debouncing for 5 second before update.")
+        await asyncio.sleep(5)
+        await update_machines(namespace)
+
+
+async def watch_pods(update_event: asyncio.Event, namespace: str):
+    """Watches for pod events and signals for a config update."""
     label_selector = {"app": "nix-csi-node"}
     logging.info(
         f"Watching for pod events in namespace '{namespace}' with selector '{label_selector}'..."
@@ -90,13 +96,37 @@ async def watch_pods_and_update_config(namespace: str):
                 logging.info(
                     f"Pod event '{event_type}' for {obj.name}. Triggering update."
                 )
-                await update_machines(namespace)
+                update_event.set()
 
         except asyncio.CancelledError:
             logging.info("Pod watcher task cancelled.")
             break
         except Exception:
-            logging.exception("Kubernetes API watch error. Retrying in 15 seconds...")
+            logging.exception("Pod watch error. Retrying in 15 seconds...")
+            await asyncio.sleep(15)
+
+
+async def watch_nodes(update_event: asyncio.Event):
+    """Watches for node label events and signals for a config update."""
+    label_selector = "nix.csi/builder"
+    logging.info(f"Watching for node events with selector '{label_selector}'...")
+    while True:
+        try:
+            async for event_type, obj in kr8s.asyncio.watch(
+                "nodes", label_selector=label_selector
+            ):
+                if event_type not in ["ADDED", "DELETED"]:
+                    continue
+                logging.info(
+                    f"Node event '{event_type}' for {obj.name}. Triggering update."
+                )
+                update_event.set()
+
+        except asyncio.CancelledError:
+            logging.info("Node watcher task cancelled.")
+            break
+        except Exception:
+            logging.exception("Node watch error. Retrying in 15 seconds...")
             await asyncio.sleep(15)
 
 
@@ -116,16 +146,14 @@ async def reconcile_secrets(namespace: str, privKey: Path, pubKey: Path):
                 "id_ed25519": privKey.read_text(),
                 "id_ed25519.pub": pubKey.read_text(),
                 "known_hosts": f"* {pubKey.read_text()}",
-                "config": textwrap.dedent(
-                    """
+                "config": textwrap.dedent("""
                     Host *
+                        User nix
                         IdentityFile ~/.ssh/id_ed25519
                         UserKnownHostsFile ~/.ssh/known_hosts
-                """
-                ),
+                """),
                 "authorized_keys": "\n".join(keys) + "\n",
-                "sshd_config": textwrap.dedent(
-                    """
+                "sshd_config": textwrap.dedent("""
                     Port 22
                     AddressFamily Any
                     HostKey /etc/ssh/id_ed25519
@@ -140,8 +168,7 @@ async def reconcile_secrets(namespace: str, privKey: Path, pubKey: Path):
                     AuthorizedKeysFile %h/.ssh/authorized_keys
                     StrictModes no
                     Subsystem sftp internal-sftp
-                """
-                ),
+                """),
             }
 
             secret_manifest = {
@@ -180,12 +207,20 @@ async def async_main():
             "ssh-keygen", "-t", "ed25519", "-f", privKey, "-N", "", "-C", "nix-csi"
         )
 
-    pod_watcher_task = asyncio.create_task(watch_pods_and_update_config(namespace))
-    secret_reconciler_task = asyncio.create_task(
-        reconcile_secrets(namespace, privKey, pubKey)
-    )
+    # This event will be used to signal when an update is needed.
+    update_needed_event = asyncio.Event()
 
-    await asyncio.gather(pod_watcher_task, secret_reconciler_task)
+    # Trigger an initial update on startup
+    update_needed_event.set()
+
+    tasks = [
+        asyncio.create_task(update_worker(update_needed_event, namespace)),
+        asyncio.create_task(watch_pods(update_needed_event, namespace)),
+        asyncio.create_task(watch_nodes(update_needed_event)),
+        asyncio.create_task(reconcile_secrets(namespace, privKey, pubKey)),
+    ]
+
+    await asyncio.gather(*tasks)
 
 
 def parse_args():
