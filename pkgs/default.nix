@@ -26,8 +26,8 @@ self: pkgs: {
   lix = pkgs.lix.overrideAttrs (oldAttrs: {
     patches = (oldAttrs.patches or [ ]) ++ [
       (pkgs.fetchpatch {
-        url = "https://github.com/Lillecarl/lix/commit/b5e5a56b93da57239feb192416291af21df8dfe8.patch";
-        hash = "sha256-b65/gMXdC1oghF5SPdmYYeqkwifzCW/cb6TGbwkne8U=";
+        url = "https://github.com/Lillecarl/lix/commit/9ac72bbd0c7802ca83a907d1fec135f31aab6d24.patch";
+        hash = "sha256-NLyURqjzbyftbjxwOGWW26jcLRtvvE0hdIriiYEnQ4Q=";
       })
     ];
     doCheck = false;
