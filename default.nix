@@ -95,7 +95,7 @@ let
                     #! ${pkgs.runtimeShell}
                     set -euo pipefail
                     set -x
-                    nix copy --no-check-sigs --to ssh-ng://nix@192.168.88.20 "$1" || true
+                    nix copy --no-check-sigs --to ssh-ng://nix@192.168.88.20 "$1" -v || true
                   '';
             };
           };
