@@ -15,7 +15,7 @@ in
       default = 2222;
     };
   };
-  config = {
+  config = lib.mkIf cfg.enable {
     kubernetes.resources.${cfg.namespace} = {
       ConfigMap.authorized-keys.data.authorized_keys = lib.concatLines cfg.authorizedKeys;
       StatefulSet.nix-cache = {
