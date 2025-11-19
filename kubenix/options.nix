@@ -9,7 +9,7 @@
     namespace = lib.mkOption {
       description = "Which namespace to deploy cknix resources too";
       type = lib.types.str;
-      default = "default";
+      default = "nix-csi";
     };
     authorizedKeys = lib.mkOption {
       description = "SSH public keys that can connect to cache and builders";
