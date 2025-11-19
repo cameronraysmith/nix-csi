@@ -1,4 +1,18 @@
 # TODO
 
-* Push builds in separate jobs?
-* Investigate chroot stores
+## Better SSH key management
+* Split server and client configuration
+* SSH certificates?
+
+## Support Nix signing
+* Add support for specifying trusted public keys
+* Implement signing all paths in the cache (when?)
+
+## Improve GC
+* Copy entire CSI stores to cache on an interval (Keep paths alive)
+* Rewrite timegc to query dead paths before querying DB for regtime
+
+## Building
+* Wrap distributed building in a nicer "package"
+* Better substitution configuration
+* Implement speed factor
