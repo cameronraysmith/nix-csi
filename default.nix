@@ -1,18 +1,17 @@
-{
-  # Do a dance where we try to use NIX_PATH if it exists.
-  pkgs ?
+let
+  flake =
     let
-      nimport = builtins.tryEval (import <nixpkgs> { });
+      lockFile = builtins.readFile ./flake.lock;
+      lockAttrs = builtins.fromJSON lockFile;
+      fcLockInfo = lockAttrs.nodes.flake-compatish.locked;
+      fcSrc = builtins.fetchTree fcLockInfo;
+      flake-compatish = import fcSrc;
     in
-    if nimport.success then
-      nimport.value
-    else
-      import (builtins.fetchTree {
-        type = "github";
-        owner = "NixOS";
-        repo = "nixpkgs";
-        ref = "nixos-unstable";
-      }) { },
+    flake-compatish ./.;
+  inherit (flake) inputs;
+in
+{
+  pkgs ? import inputs.nixpkgs { },
 }:
 let
   pkgs' = pkgs.extend (import ./pkgs);
@@ -21,25 +20,8 @@ let
   pkgs = pkgs';
   lib = pkgs.lib;
 
-  dinix =
-    let
-      path = /home/lillecarl/Code/dinix;
-    in
-    if builtins.pathExists path then
-      path
-    else
-      import (builtins.fetchTree {
-        type = "github";
-        owner = "lillecarl";
-        repo = "dinix";
-      }) { };
+  dinix = inputs.dinix;
 
-  n2cSrc = builtins.fetchTree {
-    type = "github";
-    owner = "nlewo";
-    repo = "nix2container";
-    ref = "master";
-  };
   crossAttrs = {
     "x86_64-linux" = "aarch64-linux";
     "aarch64-linux" = "x86_64-linux";
@@ -50,7 +32,7 @@ let
   };
   persys = pkgs: rec {
     inherit pkgs lib;
-    n2c = import n2cSrc {
+    n2c = import inputs.nix2container {
       inherit pkgs;
     };
     easykubenix =
@@ -83,7 +65,7 @@ let
                 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAHZ3pA0vIXiKQuwfM1ks8TipeOxfDT9fgo4xMi9iiWr lillecarl@lillecarl.com"
               ];
               ctest = {
-                enable = true;
+                enable = false;
                 replicas = 1;
               };
             };
