@@ -37,20 +37,24 @@ in
                   image = "quay.io/nix-csi/scratch:1.0.1";
                   command = [
                     "dinit"
+                    "--log-file"
+                    "/var/log/dinit.log"
+                    "--quiet"
                     "csi"
                   ];
                   securityContext.privileged = true;
-                  env = lib.mkNamedList {
-                    CSI_ENDPOINT.value = "unix:///csi/csi.sock";
-                    HOME.value = "/nix/var/nix-csi/root";
-                    KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
-                    KUBE_NODE_NAME.valueFrom.fieldRef.fieldPath = "spec.nodeName";
-                    KUBE_POD_IP.valueFrom.fieldRef.fieldPath = "status.podIP";
-                    USER.value = "root";
-                  }
-                  // lib.optionalAttrs (lib.stringLength (builtins.getEnv "GITHUB_KEY") > 0) {
-                    NIX_CONFIG.value = "access-tokens = github.com=${builtins.getEnv "GITHUB_KEY"}";
-                  };
+                  env =
+                    lib.mkNamedList {
+                      CSI_ENDPOINT.value = "unix:///csi/csi.sock";
+                      HOME.value = "/nix/var/nix-csi/root";
+                      KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
+                      KUBE_NODE_NAME.valueFrom.fieldRef.fieldPath = "spec.nodeName";
+                      KUBE_POD_IP.valueFrom.fieldRef.fieldPath = "status.podIP";
+                      USER.value = "root";
+                    }
+                    // lib.optionalAttrs (lib.stringLength (builtins.getEnv "GITHUB_KEY") > 0) {
+                      NIX_CONFIG.value = "access-tokens = github.com=${builtins.getEnv "GITHUB_KEY"}";
+                    };
                   volumeMounts = lib.mkNamedList {
                     csi-socket.mountPath = "/csi";
                     nix-config.mountPath = "/etc/nix-mount";

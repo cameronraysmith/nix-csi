@@ -71,10 +71,12 @@ def reboot_cleanup():
                 shutil.rmtree(path)
                 path.mkdir(parents=True, exist_ok=True)
 
+
 def get_current_system():
     cmd = ["nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem"]
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     return result.stdout.strip()
+
 
 def initialize():
     logger.info("Initializing NodeServicer")
@@ -84,7 +86,6 @@ def initialize():
     CSI_ROOT.mkdir(parents=True, exist_ok=True)
     CSI_VOLUMES.mkdir(parents=True, exist_ok=True)
     CSI_GCROOTS.mkdir(parents=True, exist_ok=True)
-
 
 
 class NodeServicer(csi_grpc.NodeBase):
