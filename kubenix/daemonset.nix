@@ -26,15 +26,13 @@ in
                   name = "initcopy";
                   image = cfg.image;
                   command = [ "initcopy" ];
-                  volumeMounts = {
-                    _namedlist = true;
+                  volumeMounts = lib.mkNamedList {
                     nix-store.mountPath = "/nix-volume";
                     nix-config.mountPath = "/etc/nix";
                   };
                 }
               ];
-              containers = {
-                _namedlist = true;
+              containers = lib.mkNamedList {
                 nix-csi-node = {
                   image = "quay.io/nix-csi/scratch:1.0.1";
                   command = [
@@ -42,8 +40,7 @@ in
                     "csi"
                   ];
                   securityContext.privileged = true;
-                  env = {
-                    _namedlist = true;
+                  env = lib.mkNamedList {
                     CSI_ENDPOINT.value = "unix:///csi/csi.sock";
                     HOME.value = "/nix/var/nix-csi/root";
                     KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
@@ -54,8 +51,7 @@ in
                   // lib.optionalAttrs (lib.stringLength (builtins.getEnv "GITHUB_KEY") > 0) {
                     NIX_CONFIG.value = "access-tokens = github.com=${builtins.getEnv "GITHUB_KEY"}";
                   };
-                  volumeMounts = {
-                    _namedlist = true;
+                  volumeMounts = lib.mkNamedList {
                     csi-socket.mountPath = "/csi";
                     nix-config.mountPath = "/etc/nix-mount";
                     registration.mountPath = "/registration";
@@ -84,8 +80,7 @@ in
                       valueFrom.fieldRef.fieldPath = "spec.nodeName";
                     }
                   ];
-                  volumeMounts = {
-                    _namedlist = true;
+                  volumeMounts = lib.mkNamedList {
                     csi-socket.mountPath = "/csi";
                     kubelet.mountPath = "/var/lib/kubelet";
                     registration.mountPath = "/registration";
@@ -94,15 +89,13 @@ in
                 livenessprobe = {
                   image = "registry.k8s.io/sig-storage/livenessprobe:v2.17.0";
                   args = [ "--csi-address=/csi/csi.sock" ];
-                  volumeMounts = {
-                    _namedlist = true;
+                  volumeMounts = lib.mkNamedList {
                     csi-socket.mountPath = "/csi";
                     registration.mountPath = "/registration";
                   };
                 };
               };
-              volumes = {
-                _namedlist = true;
+              volumes = lib.mkNamedList {
                 nix-config.configMap.name = "nix-csi-config";
                 registration.hostPath.path = "/var/lib/kubelet/plugins_registry";
                 nix-store.hostPath = {

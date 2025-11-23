@@ -35,23 +35,23 @@ in
                   name = "initcopy";
                   image = cfg.image;
                   command = [ "initcopy" ];
-                  volumeMounts = {
-                    _namedlist = true;
+                  volumeMounts = lib.mkNamedList {
                     nix-store.mountPath = "/nix-volume";
                     nix-config.mountPath = "/etc/nix";
                   };
                 }
               ];
-              containers = {
-                _namedlist = true;
+              containers = lib.mkNamedList {
                 cache = {
                   command = [
                     "dinit"
+                    "--log-file"
+                    "/var/log/dinit.log"
+                    "--quiet"
                     "cache"
                   ];
                   image = "quay.io/nix-csi/scratch:1.0.1";
-                  env = {
-                    _namedlist = true;
+                  env = lib.mkNamedList {
                     HOME.value = "/nix/var/nix-csi/root";
                     KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
                     BUILDERS_SERVICE_NAME.value = cfg.internalServiceName;
@@ -62,8 +62,7 @@ in
                       name = "http";
                     }
                   ];
-                  volumeMounts = {
-                    _namedlist = true;
+                  volumeMounts = lib.mkNamedList {
                     nix-config.mountPath = "/etc/nix-mount";
                     ssh.mountPath = "/etc/ssh-mount";
                     nix-store = {
@@ -73,8 +72,7 @@ in
                   };
                 };
               };
-              volumes = {
-                _namedlist = true;
+              volumes = lib.mkNamedList {
                 nix-config.configMap.name = "nix-cache-config";
                 ssh.secret = {
                   secretName = "ssh";
@@ -113,8 +111,7 @@ in
       Service.nix-cache-lb = {
         spec = {
           selector.app = "nix-cache";
-          ports = {
-            _namedlist = true;
+          ports = lib.mkNamedList {
             ssh = {
               port = cfg.cache.loadBalancerPort;
               targetPort = 22;
