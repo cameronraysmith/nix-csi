@@ -6,102 +6,134 @@
 }:
 let
   cfg = config.nix-csi;
+
+  defaultSystemFeatures = [
+    "nixos-test"
+    "benchmark"
+    "big-parallel"
+    # "kvm"
+  ];
+
+  semanticConfType =
+    with lib.types;
+    let
+      confAtom =
+        nullOr (oneOf [
+          bool
+          int
+          float
+          str
+          path
+          package
+        ])
+        // {
+          description = "Nix config atom (null, bool, int, float, str, path or package)";
+        };
+    in
+    attrsOf (either confAtom (listOf confAtom));
+
+  nixSubmodule =
+    with lib;
+    types.submodule (
+      { config, ... }:
+      {
+        options = {
+          nixConf = mkOption {
+            type = types.package;
+            internal = true;
+          };
+
+          checkConfig = mkOption {
+            type = types.bool;
+            default = true;
+          };
+
+          checkAllErrors = mkOption {
+            type = types.bool;
+            default = true;
+          };
+
+          extraOptions = mkOption {
+            type = types.lines;
+            default = "";
+          };
+
+          settings = mkOption {
+            type = types.submodule {
+              freeformType = semanticConfType;
+              options = { };
+            };
+            default = { };
+          };
+        };
+        config = {
+          settings = {
+            trusted-public-keys = [ "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" ];
+            trusted-users = [ "root" ];
+            substituters = mkAfter [ "https://cache.nixos.org/" ];
+            system-features = defaultSystemFeatures;
+          };
+          nixConf =
+            (pkgs.formats.nixConf {
+              inherit (config)
+                checkAllErrors
+                checkConfig
+                extraOptions
+                ;
+              package = pkgs.lix.out;
+              inherit (pkgs.lix) version;
+            }).generate
+              "nix.conf"
+              config.settings;
+        };
+      }
+    );
 in
 {
+  options.nix-csi.nixNodeConfig = lib.mkOption {
+    type = nixSubmodule;
+  };
+  options.nix-csi.nixCacheConfig = lib.mkOption {
+    type = nixSubmodule;
+  };
+
   config = lib.mkIf cfg.enable {
-    kubernetes.resources.${cfg.namespace} =
+    nix-csi =
       let
-        sharedConfig = # dinit
-          ''
-            # Use nix daemon for builds
-            store = daemon
-            # Users who can do supernixxy things
-            trusted-users = root nix
-            # Allow everyone to Nix!
-            allowed-users = *
-            # Auto allocare uids so we don't have to create lots of users in containers
-            auto-allocate-uids = true
-            # This supposedly helps with the sticky cache issue
-            fallback = true
-            # Enable common features
-            experimental-features = nix-command flakes auto-allocate-uids fetch-closure pipe-operator
-            # let builders sub
-            builders-use-substitutes = true
-            # Fuck purity
-            warn-dirty = false
-            # Features?
-            system-features = nixos-test benchmark big-parallel uid-range
-          '';
+        sharedSettings = {
+          store = "daemon";
+          allowed-users = [ "*" ];
+          trusted-users = [
+            "root"
+            "nix"
+          ];
+          auto-allocate-uids = true;
+          experimental-features = [
+            "nix-command"
+            "flakes"
+            "auto-allocate-uids"
+          ];
+          builders-use-substitutes = true;
+          warn-dirty = false;
+        };
       in
       {
-        ConfigMap.nix-cache-config.data = {
-          "nix.conf" = # dinit
-            ''
-              ${sharedConfig}
-              max-jobs = 0
-            '';
+        nixNodeConfig.settings = sharedSettings // {
+          substituters = [
+            "ssh-ng://nix@nix-cache?trusted=1&priority=20"
+          ];
         };
-        ConfigMap.nix-csi-config.data = {
-          "nix.conf" = # dinit
-            ''
-                ${sharedConfig}
-              # substituters
-              extra-substituters = ssh-ng://nix@nix-cache?trusted=1&priority=20
-              max-jobs = auto
-            '';
-          "nix-path.nix" = # nix
-            ''
-              let
-                paths = {
-                  nixpkgs = builtins.fetchTree {
-                    type = "github";
-                    owner = "nixos";
-                    repo = "nixpkgs";
-                    ref = "nixos-25.05";
-                  };
-                  nixos-unstable = builtins.fetchTree {
-                    type = "github";
-                    owner = "nixos";
-                    repo = "nixpkgs";
-                    ref = "nixos-unstable";
-                  };
-                  home-manager = builtins.fetchTree {
-                    type = "github";
-                    owner = "nix-community";
-                    repo = "home-manager";
-                    ref = "release-25.05";
-                  };
-                  home-manager-unstable = builtins.fetchTree {
-                    type = "github";
-                    owner = "nix-community";
-                    repo = "home-manager";
-                    ref = "master";
-                  };
-                  dinix = builtins.fetchTree {
-                    type = "github";
-                    owner = "lillecarl";
-                    repo = "dinix";
-                    ref = "main";
-                  };
-                  flake-compatish = builtins.fetchTree {
-                    type = "github";
-                    owner = "lillecarl";
-                    repo = "flake-compatish";
-                    ref = "main";
-                  };
-                };
-
-                pkgs = import paths.nixpkgs { };
-                inherit (pkgs) lib;
-
-              in
-              lib.pipe paths [
-                (lib.mapAttrsToList (name: value: "''${name}=''${value}"))
-                (lib.concatStringsSep ":")
-                (pkgs.writeText "NIX_PATH")
-              ]
-            '';
+        nixCacheConfig.settings = sharedSettings // {
+          max-jobs = lib.mkDefault 0;
         };
       };
+    kubernetes.resources.${cfg.namespace} = {
+      ConfigMap.nix-csi-config.data = {
+        "nix.conf" = builtins.readFile (cfg.nixNodeConfig.nixConf);
+      };
+      ConfigMap.nix-cache-config.data = {
+        "nix.conf" = builtins.readFile (cfg.nixCacheConfig.nixConf);
+      };
+    };
   };
 }
