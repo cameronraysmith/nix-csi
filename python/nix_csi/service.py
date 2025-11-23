@@ -3,8 +3,8 @@ import logging
 import os
 import shutil
 import socket
-import tempfile
 import math
+import subprocess
 
 from csi import csi_grpc, csi_pb2
 from grpclib import GRPCError
@@ -14,12 +14,11 @@ from importlib import metadata
 from pathlib import Path
 from typing import List
 from cachetools import TTLCache
-from asyncio import Semaphore, sleep
+from asyncio import Semaphore
 from collections import defaultdict
 from .identityservicer import IdentityServicer
 from .copytocache import copyToCache
 from .subprocessing import run_captured, run_console, try_captured, try_console
-from .kubernetes import get_builder_ips
 
 logger = logging.getLogger("nix-csi")
 
@@ -72,327 +71,201 @@ def reboot_cleanup():
                 shutil.rmtree(path)
                 path.mkdir(parents=True, exist_ok=True)
 
+def get_current_system():
+    cmd = ["nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem"]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return result.stdout.strip()
 
-async def set_nix_path():
-    NIX_PATH_LINK = CSI_ROOT / "NIX_PATH"
-    NIX_PATH_LINK.parent.mkdir(parents=True, exist_ok=True)
-    await try_console(
-        "nix",
-        "build",
-        "--max-jobs",
-        "auto",
-        "--print-out-paths",
-        "--file",
-        "/etc/nix/nix-path.nix",
-        "--out-link",
-        NIX_PATH_LINK,
-    )
-    os.environ["NIX_PATH"] = NIX_PATH_LINK.read_text().strip()
+def initialize():
+    logger.info("Initializing NodeServicer")
+    # Clean old volumes on startup
+    reboot_cleanup()
+    # Create directories we operate in
+    CSI_ROOT.mkdir(parents=True, exist_ok=True)
+    CSI_VOLUMES.mkdir(parents=True, exist_ok=True)
+    CSI_GCROOTS.mkdir(parents=True, exist_ok=True)
+
 
 
 class NodeServicer(csi_grpc.NodeBase):
-    initialized = False
-    system = "x86_64-linux"
     # Cache positive Nix commands
-    packagePathCache: TTLCache[str, Path] = TTLCache(math.inf, 60)
     pathInfoCache: TTLCache[Path, List[str]] = TTLCache(math.inf, 60)
-    # Locks that prevents the same expression to be processed in parallel
-    expressionLock: defaultdict[str, Semaphore] = defaultdict(Semaphore)
+    volumeLocks: defaultdict[str, Semaphore] = defaultdict(Semaphore)
 
-    async def initialize(self):
-        logger.info("Initializing NodeServicer")
-        # Clean old volumes on startup
-        reboot_cleanup()
-        # Create directories we operate in
-        CSI_ROOT.mkdir(parents=True, exist_ok=True)
-        CSI_VOLUMES.mkdir(parents=True, exist_ok=True)
-        CSI_GCROOTS.mkdir(parents=True, exist_ok=True)
-        await set_nix_path()
-        self.system = (
-            await try_captured(
-                "nix",
-                "eval",
-                "--raw",
-                "--impure",
-                "--expr",
-                "builtins.currentSystem",
-            )
-        ).stdout
-        logger.info("Initialized NodeServicer")
-        self.initialized = True
+    def __init__(self, system: str):
+        self.system = system
 
     async def NodePublishVolume(self, stream):
         request: csi_pb2.NodePublishVolumeRequest | None = await stream.recv_message()
         if request is None:
             raise ValueError("NodePublishVolumeRequest is None")
 
-        for i in range(120):
-            if not self.initialized:
-                await sleep(1)
-        if not self.initialized:
-            raise GRPCError(
-                Status.INTERNAL, "NodeServicer not initialized within 120 seconds"
-            )
+        async with self.volumeLocks[request.volume_id]:
+            targetPath = Path(request.target_path)
+            storePath = request.volume_context.get(self.system)
+            packagePath: Path = Path("/nonexistent/path/that/should/never/exist")
+            gcPath = CSI_GCROOTS / request.volume_id
 
-        targetPath = Path(request.target_path)
-        expression = request.volume_context.get("expression")
-        storePath = request.volume_context.get(self.system)
-        packagePath: Path = Path("/nonexistent/path/that/should/never/exist")
-        gcPath = CSI_GCROOTS / request.volume_id
-
-        if storePath is not None:
-            packagePathCacheResult = self.packagePathCache.get(storePath)
-            if packagePathCacheResult is not None and packagePathCacheResult.exists():
-                packagePath = packagePathCacheResult
-            else:
+            if storePath is not None:
                 packagePath = Path(storePath)
-                logger.debug(f"{storePath=}")
-                buildCommand = [
+                if not packagePath.exists():
+                    logger.debug(f"{storePath=}")
+                    buildCommand = [
+                        "nix",
+                        "build",
+                        # TODO: Be less opinionated
+                        "--extra-substituters",
+                        "ssh-ng://nix@nix-cache?trusted=1&priority=20",
+                        "--out-link",
+                        gcPath,
+                        packagePath,
+                    ]
+
+                    # Fetch storePath from caches
+                    await try_console(*buildCommand)
+            else:
+                raise GRPCError(
+                    Status.INVALID_ARGUMENT,
+                    f"Volume doesn't have storePath configured for {self.system}",
+                )
+
+            if not packagePath.exists():
+                raise GRPCError(
+                    Status.INVALID_ARGUMENT,
+                    "packagePath passed through all steps yet doesn't exist",
+                )
+
+            # Root directory for volume. Contains /nix, also contains "workdir" and
+            # "upperdir" if we're doing overlayfs
+            volumeRoot = CSI_VOLUMES / request.volume_id
+            # Capitalized to emphasise they're Nix environment variables
+            NIX_STATE_DIR = volumeRoot / "nix/var/nix"
+            # Create NIX_STATE_DIR where database will be initialized
+            NIX_STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+            # Get closure
+            paths = []
+            pathInfoCacheResult = self.pathInfoCache.get(packagePath)
+            if pathInfoCacheResult is not None:
+                paths = pathInfoCacheResult
+            else:
+                pathInfo = await try_captured(
+                    "nix",
+                    "path-info",
+                    "--recursive",
+                    packagePath,
+                )
+                paths = pathInfo.stdout.splitlines()
+                self.pathInfoCache[packagePath] = paths
+
+            try:
+                # This try block is essentially nix copy into a chroot store with
+                # extra steps. (Hardlinking instead of dumbcopying)
+
+                # Install CSI gcroots
+                await try_captured("nix", "build", "--out-link", gcPath, packagePath)
+
+                # Copy closure to substore, rsync saves a lot of implementation
+                # headache here. --archive keeps all attributes, --hard-links
+                # hardlinks everything hardlinkable.
+                async with RSYNC_CONCURRENCY:
+                    await try_captured(
+                        "rsync",
+                        "--one-file-system",
+                        "--recursive",
+                        "--links",
+                        "--hard-links",
+                        "--mkpath",
+                        # "--archive",
+                        *paths,
+                        volumeRoot / "nix/store",
+                    )
+
+                # Create Nix database
+                # This is an execline script that runs nix-store --dump-db | NIX_STATE_DIR=something nix-store --load-db
+                await try_captured(
+                    "nix_init_db",
+                    NIX_STATE_DIR,
+                    *paths,
+                )
+
+                # install gcroots in container using chroot store
+                # TODO: Check if this is still needed when using chroot store
+                # into /nix/var/result from below
+                await try_captured(
                     "nix",
                     "build",
-                    "--extra-substituters",
-                    "ssh-ng://nix@nix-cache?trusted=1&priority=20",
+                    "--store",
+                    volumeRoot,
                     "--out-link",
-                    gcPath,
+                    NIX_STATE_DIR / "gcroots/result",
                     packagePath,
+                )
+
+                # install /nix/var/result in container using chroot store
+                await try_captured(
+                    "nix",
+                    "build",
+                    "--store",
+                    volumeRoot,
+                    "--out-link",
+                    volumeRoot / "nix/var/result",
+                    packagePath,
+                )
+            except Exception as ex:
+                # Remove gcroots if we failed something else
+                gcPath.unlink(missing_ok=True)
+                # Remove what we were working on
+                shutil.rmtree(volumeRoot, True)
+                raise ex
+
+            targetPath.mkdir(parents=True, exist_ok=True)
+            mountCommand = []
+            if request.readonly:
+                # For readonly we use a bind mount, the benefit is that different
+                # container stores using bindmounts will get the same inodes and
+                # share page cache with others, reducing memory usage.
+                mountCommand = [
+                    "mount",
+                    "--verbose",
+                    "--bind",
+                    "-o",
+                    "ro",
+                    volumeRoot / "nix",
+                    targetPath,
+                ]
+            else:
+                # For readwrite we use an overlayfs mount, the benefit here is that
+                # it works as CoW even if the underlying filesystem doesn't support
+                # it, reducing host storage usage.
+                workdir = volumeRoot / "workdir"
+                upperdir = volumeRoot / "upperdir"
+                workdir.mkdir(parents=True, exist_ok=True)
+                upperdir.mkdir(parents=True, exist_ok=True)
+                mountCommand = [
+                    "mount",
+                    "--verbose",
+                    "-t",
+                    "overlay",
+                    "overlay",
+                    "-o",
+                    f"rw,lowerdir={volumeRoot / 'nix'},upperdir={upperdir},workdir={workdir}",
+                    targetPath,
                 ]
 
-                # Try reaching cache for substitution
-                await try_captured(
-                    "nix", "store", "ping", "--store", "ssh-ng://nix@nix-cache"
+            mount = await run_console(*mountCommand)
+            if mount.returncode == MOUNT_ALREADY_MOUNTED:
+                logger.debug(f"Mount target {targetPath} was already mounted")
+            elif mount.returncode != 0:
+                raise GRPCError(
+                    Status.INTERNAL,
+                    f"Failed to mount {mount.returncode=} {mount.stderr=}",
                 )
 
-                # Fetch storePath from caches
-                await try_console(*buildCommand)
-                if packagePath.exists():
-                    self.packagePathCache[storePath] = packagePath
+            reply = csi_pb2.NodePublishVolumeResponse()
+            await stream.send_message(reply)
 
-        elif expression is not None:
-            async with self.expressionLock[expression]:
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".nix") as f:
-                    expressionFile = Path(f.name)
-                    f.write(expression)
-                    f.flush()
-
-                    packagePathCacheResult = self.packagePathCache.get(expression)
-                    if (
-                        packagePathCacheResult is not None
-                        and packagePathCacheResult.exists()
-                    ):
-                        packagePath = packagePathCacheResult
-                    else:
-                        # eval expression to get storePath
-                        eval = await try_captured(
-                            "nix",
-                            "eval",
-                            "--raw",
-                            "--impure",
-                            "--expr",
-                            f"(import {expressionFile} {{}}).outPath",
-                        )
-                        packagePath = Path(eval.stdout)
-                        self.packagePathCache[expression] = packagePath
-                        # Try fetching from cache
-                        await run_captured("nix", "build", "--no-link", packagePath)
-
-                    if not packagePath.exists():
-                        buildCommand = [
-                            "nix",
-                            "build",
-                            "--print-out-paths",
-                            "--out-link",
-                            gcPath,
-                            "--file",
-                            expressionFile,
-                        ]
-
-                        # Try reaching cache for substitution
-                        try:
-                            await try_captured(
-                                "nix",
-                                "store",
-                                "ping",
-                                "--store",
-                                "ssh-ng://nix@nix-cache",
-                            )
-                            buildCommand += [
-                                "--extra-substituters",
-                                "ssh-ng://nix@nix-cache?trusted=1&priority=20",
-                            ]
-                        except Exception:
-                            pass
-
-                        reachable_builders = []
-                        for ip in await get_builder_ips(NAMESPACE):
-                            if ip == os.environ["KUBE_POD_IP"]:
-                                continue
-                            try:
-                                await try_captured(
-                                    "nix",
-                                    "store",
-                                    "ping",
-                                    "--store",
-                                    f"ssh-ng://nix@{ip}",
-                                )
-                                reachable_builders.append(
-                                    f"ssh-ng://nix@{ip}?trusted=1"
-                                )
-                            except Exception:
-                                pass
-                        if len(reachable_builders) > 0:
-                            buildCommand += ["--builders", ";".join(reachable_builders)]
-
-                        # Update packagePath when we've built it, required to
-                        # prevent impure derivations from never "finalizing"
-                        packagePath = Path(
-                            (await try_console(*buildCommand)).stdout.splitlines()[0]
-                        )
-
-                        if packagePath.exists():
-                            self.packagePathCache[expression] = packagePath
-        else:
-            raise GRPCError(
-                Status.INVALID_ARGUMENT,
-                "Set either `expression` or `storePath` in volume attributes",
-            )
-
-        if not packagePath.exists():
-            raise GRPCError(
-                Status.INVALID_ARGUMENT,
-                "packagePath passed through all build steps yet doesn't exist",
-            )
-
-        # Root directory for volume. Contains /nix, also contains "workdir" and
-        # "upperdir" if we're doing overlayfs
-        volumeRoot = CSI_VOLUMES / request.volume_id
-        # Capitalized to emphasise they're Nix environment variables
-        NIX_STATE_DIR = volumeRoot / "nix/var/nix"
-        # Create NIX_STATE_DIR where database will be initialized
-        NIX_STATE_DIR.mkdir(parents=True, exist_ok=True)
-
-        # Get closure
-        paths = []
-        pathInfoCacheResult = self.pathInfoCache.get(packagePath)
-        if pathInfoCacheResult is not None:
-            paths = pathInfoCacheResult
-        else:
-            pathInfo = await try_captured(
-                "nix",
-                "path-info",
-                "--recursive",
-                packagePath,
-            )
-            paths = pathInfo.stdout.splitlines()
-            self.pathInfoCache[packagePath] = paths
-
-        try:
-            # This try block is essentially nix copy into a chroot store with
-            # extra steps. (Hardlinking instead of dumbcopying)
-
-            # Install CSI gcroots
-            await try_captured("nix", "build", "--out-link", gcPath, packagePath)
-
-            # Copy closure to substore, rsync saves a lot of implementation
-            # headache here. --archive keeps all attributes, --hard-links
-            # hardlinks everything hardlinkable.
-            async with RSYNC_CONCURRENCY:
-                await try_captured(
-                    "rsync",
-                    "--one-file-system",
-                    "--recursive",
-                    "--links",
-                    "--hard-links",
-                    "--mkpath",
-                    # "--archive",
-                    *paths,
-                    volumeRoot / "nix/store",
-                )
-
-            # Create Nix database
-            # This is an execline script that runs nix-store --dump-db | NIX_STATE_DIR=something nix-store --load-db
-            await try_captured(
-                "nix_init_db",
-                NIX_STATE_DIR,
-                *paths,
-            )
-
-            # install gcroots in container using chroot store
-            # TODO: Check if this is still needed when using chroot store
-            # into /nix/var/result from below
-            await try_captured(
-                "nix",
-                "build",
-                "--store",
-                volumeRoot,
-                "--out-link",
-                NIX_STATE_DIR / "gcroots/result",
-                packagePath,
-            )
-
-            # install /nix/var/result in container using chroot store
-            await try_captured(
-                "nix",
-                "build",
-                "--store",
-                volumeRoot,
-                "--out-link",
-                volumeRoot / "nix/var/result",
-                packagePath,
-            )
-        except Exception as ex:
-            # Remove gcroots if we failed something else
-            gcPath.unlink(missing_ok=True)
-            # Remove what we were working on
-            shutil.rmtree(volumeRoot, True)
-            raise ex
-
-        targetPath.mkdir(parents=True, exist_ok=True)
-        mountCommand = []
-        if request.readonly:
-            # For readonly we use a bind mount, the benefit is that different
-            # container stores using bindmounts will get the same inodes and
-            # share page cache with others, reducing memory usage.
-            mountCommand = [
-                "mount",
-                "--verbose",
-                "--bind",
-                "-o",
-                "ro",
-                volumeRoot / "nix",
-                targetPath,
-            ]
-        else:
-            # For readwrite we use an overlayfs mount, the benefit here is that
-            # it works as CoW even if the underlying filesystem doesn't support
-            # it, reducing host storage usage.
-            workdir = volumeRoot / "workdir"
-            upperdir = volumeRoot / "upperdir"
-            workdir.mkdir(parents=True, exist_ok=True)
-            upperdir.mkdir(parents=True, exist_ok=True)
-            mountCommand = [
-                "mount",
-                "--verbose",
-                "-t",
-                "overlay",
-                "overlay",
-                "-o",
-                f"rw,lowerdir={volumeRoot / 'nix'},upperdir={upperdir},workdir={workdir}",
-                targetPath,
-            ]
-
-        mount = await run_console(*mountCommand)
-        if mount.returncode == MOUNT_ALREADY_MOUNTED:
-            logger.debug(f"Mount target {targetPath} was already mounted")
-        elif mount.returncode != 0:
-            raise GRPCError(
-                Status.INTERNAL,
-                f"Failed to mount {mount.returncode=} {mount.stderr=}",
-            )
-
-        reply = csi_pb2.NodePublishVolumeResponse()
-        await stream.send_message(reply)
-
-        asyncio.create_task(copyToCache(packagePath))
+            asyncio.create_task(copyToCache(packagePath))
 
     async def NodeUnpublishVolume(self, stream):
         request: csi_pb2.NodeUnpublishVolumeRequest | None = await stream.recv_message()
@@ -467,7 +340,7 @@ async def serve():
     Path(sock_path).unlink(missing_ok=True)
 
     identityServicer = IdentityServicer()
-    nodeServicer = NodeServicer()
+    nodeServicer = NodeServicer(get_current_system())
 
     server = Server(
         [
@@ -481,7 +354,7 @@ async def serve():
     sock.listen(128)
     sock.setblocking(False)
 
+    initialize()
     await server.start(sock=sock)
     logger.info(f"CSI driver (grpclib) listening on unix://{sock_path}")
-    await nodeServicer.initialize()
     await server.wait_closed()
