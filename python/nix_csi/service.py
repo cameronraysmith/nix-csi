@@ -114,9 +114,6 @@ class NodeServicer(csi_grpc.NodeBase):
                     buildCommand = [
                         "nix",
                         "build",
-                        # TODO: Be less opinionated
-                        "--extra-substituters",
-                        "ssh-ng://nix@nix-cache?trusted=1&priority=20",
                         "--out-link",
                         gcPath,
                         packagePath,
@@ -177,13 +174,12 @@ class NodeServicer(csi_grpc.NodeBase):
                         "--links",
                         "--hard-links",
                         "--mkpath",
-                        # "--archive",
                         *paths,
                         volumeRoot / "nix/store",
                     )
 
                 # Create Nix database
-                # This is an execline script that runs nix-store --dump-db | NIX_STATE_DIR=something nix-store --load-db
+                # This is a bash script that runs nix-store --dump-db | NIX_STATE_DIR=something nix-store --load-db
                 await try_captured(
                     "nix_init_db",
                     NIX_STATE_DIR,
