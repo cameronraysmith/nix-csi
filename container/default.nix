@@ -49,18 +49,22 @@ let
                     test -f /etc/ssh/sshd_config && break
                     sleep 1
                   done
-                  ${lib.getExe' pkgs.openssh "sshd"} -D -f /etc/ssh/sshd_config -e
+                  exec ${lib.getExe' pkgs.openssh "sshd"} -D -f /etc/ssh/sshd_config -e
                 '';
-            options = [ "shares-console" ];
             depends-on = [ "shared-setup" ];
+            log-type = "file";
+            logfile = "/var/log/ssh.log";
           };
           services.nix-daemon = {
-            command = "${lib.getExe' pkgs.lix "nix-daemon"} --daemon --store local";
+            command = "${lib.getExe pkgs.lix} daemon --store local";
             depends-on = [ "shared-setup" ];
+            log-type = "file";
+            logfile = "/var/log/nix-daemon.log";
           };
           services.config-reconciler = {
             type = "process";
-            options = [ "shares-console" ];
+            log-type = "file";
+            logfile = "/var/log/config-reconciler.log";
             command =
               pkgs.writeScriptBin "config-reconciler" # bash
                 ''
@@ -95,7 +99,8 @@ let
           };
           services.shared-setup = {
             type = "scripted";
-            options = [ "shares-console" ];
+            log-type = "file";
+            logfile = "/var/log/shared-setup.log";
             depends-on = [ "config-reconciler" ];
             command =
               pkgs.writeScriptBin "shared-setup" # bash
@@ -123,11 +128,11 @@ let
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --exclude='authorized_keys' /etc/ssh-mount/ $HOME/.ssh/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=root:root /etc/ssh-mount/ /etc/ssh/
                   rsync --archive --mkpath --copy-links --chmod=D700,F600 --chown=nix:nix /etc/ssh-mount/ /home/nix/.ssh/
-                  # Fix gcroots for /nix/var/result. The ones created by initCopy
+                  # Fix gcroots for /nix/var/result. The one created by initCopy
                   # points to invalid symlinks in the chain
                   # (auto -> /nix-volume/var/result) rather than
-                  # auto -> /nix/var/result. The link back to store works though
-                  # so this will just fix gcroots.
+                  # (auto -> /nix/var/result). The link back to store works
+                  # though so this just fixes gcroots.
                   nix build --store local --out-link /nix/var/result /nix/var/result
                 '';
           };
@@ -148,7 +153,7 @@ let
         }:$PATH
         # Copy entire entire container image into volume
         nix path-info --store local --all | nix copy --store local --to /nix-volume --no-check-sigs --stdin
-        # Link /nix/var/result properly so it doesn't get GC'd
+        # Link /nix/var/result
         nix build --store /nix-volume --out-link /nix-volume/nix/var/result ${pathEnv}
       '';
   pathEnv = pkgs.buildEnv {
