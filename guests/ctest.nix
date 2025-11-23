@@ -1,29 +1,7 @@
 {
   pkgs ? import <nixpkgs> { },
-  dinix ? import <dinix>,
 }:
 let
-  inherit (pkgs) lib;
-  dinixEval = (dinix {
-    inherit pkgs;
-    modules = [
-      {
-        config = {
-          services.boot = {
-            depends-on = [
-              "ctest"
-            ];
-          };
-          services.ctest = {
-            type = "process";
-            command = "${lib.getExe ctest}";
-            options = [ "shares-console" ];
-          };
-        };
-      }
-    ];
-  });
-
   ctest = pkgs.stdenv.mkDerivation {
     pname = "big-binary";
     version = "0.1";
@@ -33,6 +11,8 @@ let
         ''
           #include <stdio.h>
           #include <unistd.h>
+          #include <signal.h> // Required for signal handling
+          #include <stdbool.h> // Required for bool type
 
           // ${toString builtins.currentTime}
 
@@ -40,7 +20,20 @@ let
 
           static char big_array[ARRAY_SIZE] = {1};
 
+          // Volatile flag to ensure visibility across threads/signal handlers
+          volatile bool shutdown_requested = false;
+
+          // Signal handler function
+          void handle_shutdown_signal(int signum) {
+              printf("\nReceived signal %d. Initiating graceful shutdown...\n", signum);
+              shutdown_requested = true;
+          }
+
           int main() {
+              // Register signal handlers for SIGINT and SIGTERM
+              signal(SIGINT, handle_shutdown_signal);
+              signal(SIGTERM, handle_shutdown_signal);
+
               printf("Binary size is large due to a static array!\n");
 
               // Use a volatile accumulator to prevent the loop from being optimized away.
@@ -50,13 +43,16 @@ let
                   sum += big_array[i];
               }
 
-              // Infinite loop to keep the process alive.
-              while (1) {
-                  printf("Finished. Sum: %lld\n", sum);
+              printf("Finished array sum. Sum: %lld\n", sum);
+
+              // Loop to keep the process alive, checking for shutdown requests
+              while (!shutdown_requested) {
+                  printf("Application running...\n");
                   sleep(1);
               }
 
-              return 0; // Unreachable
+              printf("Graceful shutdown complete. Exiting.\n");
+              return 0;
           }
         '';
 
@@ -84,9 +80,7 @@ in
 pkgs.buildEnv {
   name = "ctestenv";
   paths = [
-    dinixEval.config.containerWrapper
-    pkgs.fish
-    pkgs.lix
-    pkgs.coreutils
+    ctest
   ];
+  meta.mainProgram = ctest.meta.mainProgram;
 }
