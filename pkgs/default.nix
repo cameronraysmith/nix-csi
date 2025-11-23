@@ -2,18 +2,15 @@ self: pkgs: {
   # Overlay lib
   lib = pkgs.lib.extend (import ../lib);
 
-  # execline script that takes NIX_STATE_DIR as first and second arg, then
-  # storepaths as consecutive args. Dumps nix database one NIX_STATE_DIR and
-  # imports it into another NIX_STATE_DIR database
+  # First argument is NIX_STATE_DIR which is where we init the dumped database
   nix_init_db =
-    pkgs.writeScriptBin "nix_init_db" # execline
+    pkgs.writeScriptBin "nix_init_db" # bash
       ''
-        #! ${self.lib.getExe' pkgs.execline "execlineb"} -s1
-        emptyenv -p
-        pipeline { nix-store --option store local --dump-db $@ }
+        #! ${pkgs.runtimeShell}
+        NSD="$1"
+        shift
         export USER nobody
-        export NIX_STATE_DIR $1
-        exec nix-store --load-db --option store local
+        nix-store --option store local --dump-db "$@" | NIX_STATE_DIR="$NSD" nix-store --load-db --option store local
       '';
 
   nix-csi = self.csi-root.csi;
