@@ -47,12 +47,11 @@ in
                 name = "nix-csi";
                 csi = {
                   driver = "nix.csi.store";
-                  readOnly = true;
-                  volumeAttributes.expression = builtins.readFile ../guests/ctest.nix;
-                  # volumeAttributes.${pkgs.system} = import ../guests/ctest.nix {
-                  #   inherit pkgs;
-                  #   dinix = import /home/lillecarl/Code/dinix;
-                  # };
+                  readOnly = false;
+                  volumeAttributes.${pkgs.system} = import ../guests/ctest.nix {
+                    inherit pkgs;
+                    dinix = import /home/lillecarl/Code/dinix;
+                  };
                 };
               }
             ];
