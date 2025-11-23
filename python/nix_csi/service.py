@@ -273,35 +273,36 @@ class NodeServicer(csi_grpc.NodeBase):
         if request is None:
             raise ValueError("NodeUnpublishVolumeRequest is None")
 
-        errors = []
-        targetPath = Path(request.target_path)
+        async with self.volumeLocks[request.volume_id]:
+            errors = []
+            targetPath = Path(request.target_path)
 
-        # Check if mounted first
-        check = await run_captured("mountpoint", "--quiet", targetPath)
-        if check.returncode == 0:
-            umount = await run_console("umount", "--verbose", targetPath)
-            if umount.returncode != 0:
-                errors.append(f"umount failed {umount.returncode=} {umount.stderr=}")
+            # Check if mounted first
+            check = await run_captured("mountpoint", "--quiet", targetPath)
+            if check.returncode == 0:
+                umount = await run_console("umount", "--verbose", targetPath)
+                if umount.returncode != 0:
+                    errors.append(f"umount failed {umount.returncode=} {umount.stderr=}")
 
-        gcPath = CSI_GCROOTS / request.volume_id
-        if gcPath.exists():
-            try:
-                gcPath.unlink()
-            except Exception as ex:
-                errors.append(f"gcroot unlink failed: {ex}")
+            gcPath = CSI_GCROOTS / request.volume_id
+            if gcPath.exists():
+                try:
+                    gcPath.unlink()
+                except Exception as ex:
+                    errors.append(f"gcroot unlink failed: {ex}")
 
-        volume_path = CSI_VOLUMES / request.volume_id
-        if volume_path.exists():
-            try:
-                shutil.rmtree(volume_path)
-            except Exception as ex:
-                errors.append(f"volume cleanup failed: {ex}")
+            volume_path = CSI_VOLUMES / request.volume_id
+            if volume_path.exists():
+                try:
+                    shutil.rmtree(volume_path)
+                except Exception as ex:
+                    errors.append(f"volume cleanup failed: {ex}")
 
-        if errors:
-            raise GRPCError(Status.INTERNAL, "; ".join(errors))
+            if errors:
+                raise GRPCError(Status.INTERNAL, "; ".join(errors))
 
-        reply = csi_pb2.NodeUnpublishVolumeResponse()
-        await stream.send_message(reply)
+            reply = csi_pb2.NodeUnpublishVolumeResponse()
+            await stream.send_message(reply)
 
     async def NodeGetCapabilities(self, stream):
         request: csi_pb2.NodeGetCapabilitiesRequest | None = await stream.recv_message()
