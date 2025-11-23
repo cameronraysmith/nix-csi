@@ -34,31 +34,19 @@ in
                 {
                   name = "ctest";
                   command = [ pkg.${system}.meta.mainProgram ];
-                  image = "quay.io/nix-csi/scratch:1.0.0";
-                  env = [
-                    {
-                      name = "PATH";
-                      value = "/nix/var/result/bin";
-                    }
-                  ];
-                  volumeMounts = [
-                    {
-                      name = "nix-csi";
-                      mountPath = "/nix";
-                    }
-                  ];
-                }
-              ];
-              volumes = [
-                {
-                  name = "nix-csi";
-                  csi = {
-                    driver = "nix.csi.store";
-                    readOnly = false;
-                    volumeAttributes.${system} = pkg.${system};
+                  image = "quay.io/nix-csi/scratch:1.0.1";
+                  volumeMounts = lib.mkNamedList {
+                    nix-csi.mountPath = "/nix";
                   };
                 }
               ];
+              volumes = lib.mkNamedList {
+                nix-csi.csi = {
+                  driver = "nix.csi.store";
+                  readOnly = false;
+                  volumeAttributes.${system} = pkg.${system};
+                };
+              };
             };
           };
         };
