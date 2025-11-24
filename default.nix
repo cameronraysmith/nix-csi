@@ -45,6 +45,13 @@ let
       modules = [
         ./kubenix
         {
+          config.nix-csi.authorizedKeys = lib.pipe (lib.filesystem.listFilesRecursive ./keys) [
+            (lib.filter (name: lib.hasSuffix ".pub" name))
+            (lib.map (name: builtins.readFile name))
+            (lib.map (key: lib.trim key))
+          ];
+        }
+        {
           config = {
             nix-csi = {
               enable = true;
@@ -52,9 +59,6 @@ let
             // lib.optionalAttrs (local != null) {
               image = imageRef;
               cache.storageClassName = "local-path";
-              authorizedKeys = [
-                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAHZ3pA0vIXiKQuwfM1ks8TipeOxfDT9fgo4xMi9iiWr lillecarl@lillecarl.com"
-              ];
               ctest = {
                 enable = false;
                 replicas = 1;
