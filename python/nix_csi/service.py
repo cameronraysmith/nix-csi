@@ -14,7 +14,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import List
 from cachetools import TTLCache
-from asyncio import Semaphore
+from asyncio import Semaphore, sleep
 from collections import defaultdict
 from .identityservicer import IdentityServicer
 from .copytocache import copyToCache
@@ -273,12 +273,23 @@ class NodeServicer(csi_grpc.NodeBase):
             errors = []
             targetPath = Path(request.target_path)
 
-            # Check if mounted first
-            check = await run_captured("mountpoint", "--quiet", targetPath)
-            if check.returncode == 0:
-                umount = await run_console("umount", "--verbose", targetPath)
+            # unmounting might silently fail
+            for _ in range(100):
+                umount = await run_console(
+                    "umount", "--recursive", "--verbose", targetPath
+                )
                 if umount.returncode != 0:
-                    errors.append(f"umount failed {umount.returncode=} {umount.stderr=}")
+                    errors.append(
+                        f"umount failed {umount.returncode=} {umount.stderr=}"
+                    )
+
+                # exits 0 if there's something to display
+                if await run_captured("findmnt", targetPath) != 0:
+                    break
+
+                await sleep(0.1)
+            else:
+                errors.append("Failed to unmount after many retries")
 
             gcPath = CSI_GCROOTS / request.volume_id
             if gcPath.exists():

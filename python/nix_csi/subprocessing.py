@@ -2,7 +2,6 @@ import logging
 import shlex
 import asyncio
 import time
-import traceback
 from typing import NamedTuple
 
 from grpclib import GRPCError
