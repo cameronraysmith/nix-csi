@@ -51,13 +51,12 @@ in
 
       # Binds the Role to the ServiceAccount.
       ClusterRoleBinding.nix-csi = {
-        subjects = [
-          {
+        subjects = lib.mkNamedList {
+          nix-csi = {
             kind = "ServiceAccount";
-            name = "nix-csi";
             namespace = cfg.namespace;
-          }
-        ];
+          };
+        };
         roleRef = {
           kind = "ClusterRole";
           name = "nix-csi";

@@ -1,8 +1,7 @@
-{ config, lib, ... }:
+{ config, pkgs, lib, ... }:
 let
   cfg = config.nix-csi;
   nsRes = config.kubernetes.resources.${cfg.namespace};
-  hashAttrs = attrs: builtins.hashString "md5" (builtins.toJSON attrs);
 in
 {
   options.nix-csi.cache = {
@@ -15,111 +14,117 @@ in
       default = 2222;
     };
   };
-  config = lib.mkIf cfg.enable {
-    kubernetes.resources.${cfg.namespace} = {
-      ConfigMap.authorized-keys.data.authorized_keys = lib.concatLines cfg.authorizedKeys;
-      StatefulSet.nix-cache = {
-        spec = {
-          serviceName = "nix-cache";
-          replicas = 1;
-          selector.matchLabels.app = "nix-cache";
-          template = {
-            metadata.labels.app = "nix-cache";
-
-            metadata.annotations.configHash = hashAttrs nsRes.ConfigMap.nix-cache-config;
-            metadata.annotations.exprHash = hashAttrs nsRes.StatefulSet.nix-cache.spec.template.spec.volumes;
-            spec = {
-              serviceAccountName = "nix-csi";
-              initContainers = [
-                {
-                  name = "initcopy";
-                  image = cfg.image;
-                  command = [ "initcopy" ];
-                  volumeMounts = lib.mkNamedList {
-                    nix-store.mountPath = "/nix-volume";
-                    nix-config.mountPath = "/etc/nix";
-                  };
-                }
-              ];
-              containers = lib.mkNamedList {
-                cache = {
-                  command = [
-                    "dinit"
-                    "--log-file"
-                    "/var/log/dinit.log"
-                    "--quiet"
-                    "cache"
-                  ];
-                  image = "quay.io/nix-csi/scratch:1.0.1";
-                  env = lib.mkNamedList {
-                    HOME.value = "/nix/var/nix-csi/root";
-                    KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
-                    BUILDERS_SERVICE_NAME.value = cfg.internalServiceName;
-                  };
-                  ports = [
-                    {
-                      containerPort = 80;
-                      name = "http";
-                    }
-                  ];
-                  volumeMounts = lib.mkNamedList {
-                    nix-config.mountPath = "/etc/nix-mount";
-                    ssh.mountPath = "/etc/ssh-mount";
-                    nix-store = {
-                      mountPath = "/nix";
-                      subPath = "nix";
+  config =
+    let
+      labels = {
+        "app.kubernetes.io/name" = "cache";
+        "app.kubernetes.io/part-of" = "nix-csi";
+        "app.kubernetes.io/version" = pkgs.nix-csi.version;
+      };
+    in
+    lib.mkIf cfg.enable {
+      kubernetes.resources.${cfg.namespace} = {
+        ConfigMap.authorized-keys.data.authorized_keys = lib.concatLines cfg.authorizedKeys;
+        StatefulSet.nix-cache = {
+          spec = {
+            serviceName = "nix-cache";
+            replicas = 1;
+            selector.matchLabels = labels;
+            template = {
+              metadata.labels = labels;
+              metadata.annotations = {
+                "kubectl.kubernetes.io/default-container" = "nix-cache";
+                configHash = lib.hashAttrs nsRes.ConfigMap.nix-cache-config;
+              };
+              spec = {
+                serviceAccountName = "nix-csi";
+                initContainers = lib.mkNumberedList {
+                  "1" = {
+                    name = "initcopy";
+                    image = cfg.image;
+                    command = [ "initcopy" ];
+                    volumeMounts = lib.mkNamedList {
+                      nix-store.mountPath = "/nix-volume";
+                      nix-config.mountPath = "/etc/nix";
                     };
                   };
                 };
+                containers = lib.mkNamedList {
+                  cache = {
+                    command = [
+                      "dinit"
+                      "--log-file"
+                      "/var/log/dinit.log"
+                      "--quiet"
+                      "cache"
+                    ];
+                    image = "quay.io/nix-csi/scratch:1.0.1";
+                    env = lib.mkNamedList {
+                      HOME.value = "/nix/var/nix-csi/root";
+                      KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
+                      BUILDERS_SERVICE_NAME.value = cfg.internalServiceName;
+                    };
+                    ports = lib.mkNamedList {
+                      ssh.containerPort = 22;
+                      http.containerPort = 80;
+                    };
+                    volumeMounts = lib.mkNamedList {
+                      nix-config.mountPath = "/etc/nix-mount";
+                      ssh.mountPath = "/etc/ssh-mount";
+                      nix-store = {
+                        mountPath = "/nix";
+                        subPath = "nix";
+                      };
+                    };
+                  };
+                };
+                volumes = lib.mkNamedList {
+                  nix-config.configMap.name = "nix-cache-config";
+                  ssh.secret = {
+                    secretName = "ssh";
+                    defaultMode = 384;
+                    optional = true;
+                  };
+                };
               };
-              volumes = lib.mkNamedList {
-                nix-config.configMap.name = "nix-cache-config";
-                ssh.secret = {
-                  secretName = "ssh";
-                  defaultMode = 384;
-                  optional = true;
+            };
+            volumeClaimTemplates = lib.mkNumberedList {
+              "1" = {
+                metadata.name = "nix-store";
+                spec = {
+                  accessModes = [ "ReadWriteOnce" ];
+                  resources.requests.storage = "10Gi";
+                  inherit (cfg.cache) storageClassName;
                 };
               };
             };
           };
-          volumeClaimTemplates = [
-            {
-              metadata.name = "nix-store";
-              spec = {
-                accessModes = [ "ReadWriteOnce" ];
-                resources.requests.storage = "10Gi";
-                inherit (cfg.cache) storageClassName;
-              };
-            }
-          ];
         };
-      };
 
-      Service.nix-cache = {
-        spec = {
-          selector.app = "nix-cache";
-          ports = [
-            {
-              port = 22;
-              targetPort = 22;
-              name = "ssh";
-            }
-          ];
-          type = "ClusterIP";
-        };
-      };
-      Service.nix-cache-lb = {
-        spec = {
-          selector.app = "nix-cache";
-          ports = lib.mkNamedList {
-            ssh = {
-              port = cfg.cache.loadBalancerPort;
-              targetPort = 22;
+        Service.nix-cache = {
+          spec = {
+            selector = labels;
+            ports = lib.mkNamedList {
+              ssh = {
+                port = 22;
+                targetPort = "ssh";
+              };
             };
+            type = "ClusterIP";
           };
-          type = "LoadBalancer";
+        };
+        Service.nix-cache-lb = {
+          spec = {
+            selector = labels;
+            ports = lib.mkNamedList {
+              ssh = {
+                port = cfg.cache.loadBalancerPort;
+                targetPort = "ssh";
+              };
+            };
+            type = "LoadBalancer";
+          };
         };
       };
     };
-  };
 }

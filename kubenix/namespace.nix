@@ -5,8 +5,6 @@ let
 in
 {
   config = lib.mkIf cfg.enable {
-    kubernetes.resources.none = lib.mkIf (namespace != "default") {
-      Namespace.${namespace} = { };
-    };
+    kubernetes.resources.none.Namespace.${namespace} = { };
   };
 }
