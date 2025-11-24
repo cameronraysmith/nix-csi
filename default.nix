@@ -53,6 +53,7 @@ let
 
     # kubenix evaluation
     kubenixEval = easykubenix {
+      inherit pkgs;
       modules = [
         ./kubenix
         {
