@@ -14,7 +14,7 @@ in
     in
     lib.mkIf cfg.enable {
       kubernetes.resources.${cfg.namespace} = {
-        DaemonSet.nix-csi-node = {
+        DaemonSet.nix-node = {
           spec = {
             updateStrategy = {
               type = "RollingUpdate";
@@ -24,7 +24,7 @@ in
             template = {
               metadata.labels = labels;
               metadata.annotations = {
-                "kubectl.kubernetes.io/default-container" = "nix-csi-node";
+                "kubectl.kubernetes.io/default-container" = "nix-node";
                 configHash = lib.hashAttrs nsRes.ConfigMap.nix-cache-config;
               };
               spec = {
@@ -42,7 +42,7 @@ in
                   };
                 };
                 containers = lib.mkNamedList {
-                  nix-csi-node = {
+                  nix-node = {
                     image = "quay.io/nix-csi/scratch:1.0.1";
                     command = [
                       "dinit"
@@ -132,7 +132,7 @@ in
         # DNS for pods
         Service.${cfg.internalServiceName}.spec = {
           clusterIP = "None";
-          selector.app = "nix-csi-node";
+          selector = labels;
           ports = lib.mkNamedList {
             ssh.port = 22;
           };
