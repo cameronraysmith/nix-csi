@@ -72,11 +72,8 @@ def reboot_cleanup():
                 path.mkdir(parents=True, exist_ok=True)
 
 
-def get_current_system():
-    cmd = ["nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem"]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return result.stdout.strip()
-
+async def get_current_system():
+    return (await try_captured("nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem")).stdout
 
 def initialize():
     logger.info("Initializing NodeServicer")
@@ -349,7 +346,8 @@ async def serve():
     Path(sock_path).unlink(missing_ok=True)
 
     identityServicer = IdentityServicer()
-    nodeServicer = NodeServicer(get_current_system())
+    nodeServicer = NodeServicer(await get_current_system())
+    initialize()
 
     server = Server(
         [
@@ -363,7 +361,6 @@ async def serve():
     sock.listen(128)
     sock.setblocking(False)
 
-    initialize()
     await server.start(sock=sock)
     logger.info(f"CSI driver (grpclib) listening on unix://{sock_path}")
     await server.wait_closed()
