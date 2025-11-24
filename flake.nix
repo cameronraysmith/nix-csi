@@ -5,6 +5,10 @@
       url = "github:lillecarl/flake-compatish";
       flake = false;
     };
+    easykubenix = {
+      url = "github:lillecarl/easykubenix";
+      flake = false;
+    };
     dinix = {
       url = "github:lillecarl/dinix";
       flake = false;

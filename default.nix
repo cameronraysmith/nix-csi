@@ -36,20 +36,7 @@ let
     n2c = import inputs.nix2container {
       inherit pkgs;
     };
-    easykubenix =
-      let
-        try = builtins.tryEval (import /home/lillecarl/Code/easykubenix);
-      in
-      if try.success then
-        try.value
-      else
-        import (
-          builtins.fetchTree {
-            type = "github";
-            owner = "lillecarl";
-            repo = "easykubenix";
-          }
-        );
+    easykubenix = import inputs.easykubenix;
 
     # kubenix evaluation
     kubenixEval = easykubenix {
