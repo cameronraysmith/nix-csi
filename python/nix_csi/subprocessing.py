@@ -25,6 +25,7 @@ async def try_captured(*args):
         raise GRPCError(
             Status.INTERNAL,
             f"{shlex.join([str(arg) for arg in args[:5]])}... failed: {result.returncode=}",
+            result.combined
         )
     return result
 
@@ -35,6 +36,7 @@ async def try_console(*args, log_level: int = logging.DEBUG):
         raise GRPCError(
             Status.INTERNAL,
             f"{shlex.join([str(arg) for arg in args[:5]])}... failed: {result.returncode=}",
+            result.combined
         )
     return result
 
