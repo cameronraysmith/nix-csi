@@ -81,6 +81,8 @@ pkgs.buildEnv {
   name = "ctestenv";
   paths = [
     ctest
+    pkgs.fishMinimal
+    pkgs.lix
   ];
   meta.mainProgram = ctest.meta.mainProgram;
 }

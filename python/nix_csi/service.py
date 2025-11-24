@@ -183,9 +183,9 @@ class NodeServicer(csi_grpc.NodeBase):
                     *paths,
                 )
 
-                # install gcroots in container using chroot store
-                # TODO: Check if this is still needed when using chroot store
-                # into /nix/var/result from below
+                # install gcroots in container using chroot store this is
+                # required because the auto roots created for /nix/var/result
+                # will point to Narnia while this one points into store.
                 await try_captured(
                     "nix",
                     "build",
