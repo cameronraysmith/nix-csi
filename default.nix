@@ -13,6 +13,7 @@ let
 in
 {
   pkgs ? import inputs.nixpkgs { },
+  local ? null,
 }:
 let
   pkgs' = pkgs.extend (import ./pkgs);
@@ -47,7 +48,8 @@ let
           config = {
             nix-csi = {
               enable = true;
-              namespace = "nix-csi";
+            }
+            // lib.optionalAttrs (local != null) {
               image = imageRef;
               cache.storageClassName = "local-path";
               authorizedKeys = [
@@ -60,6 +62,8 @@ let
             };
             kluctl = {
               discriminator = "nix-csi";
+            }
+            // lib.optionalAttrs (local != null) {
               preDeployScript =
                 pkgs.writeScriptBin "preDeployScript" # bash
                   ''

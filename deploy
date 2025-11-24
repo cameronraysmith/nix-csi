@@ -1,4 +1,4 @@
 #! /usr/bin/env fish
 
 nix run --file . imageToContainerd || return 1
-nix run --file . kubenixEval.deploymentScript -- --yes --prune $argv || return 1
+nix run --file . kubenixEval.deploymentScript --argstr local "" -- --yes --prune $argv || return 1
