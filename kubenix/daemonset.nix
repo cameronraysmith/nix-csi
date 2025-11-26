@@ -9,7 +9,6 @@ in
       labels = {
         "app.kubernetes.io/name" = "csi";
         "app.kubernetes.io/part-of" = "nix-csi";
-        "app.kubernetes.io/version" = pkgs.nix-csi.version;
       };
     in
     lib.mkIf cfg.enable {
