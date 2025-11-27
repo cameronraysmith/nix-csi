@@ -60,7 +60,7 @@ let
               image = imageRef;
               cache.storageClassName = "local-path";
               ctest = {
-                enable = false;
+                enable = true;
                 replicas = 1;
               };
             };
