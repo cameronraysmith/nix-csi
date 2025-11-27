@@ -5,7 +5,7 @@
 * SSH certificates?
 
 ## Support Nix signing
-* Add support for specifying trusted public keys
+- Add support for specifying trusted public keys
 * Implement signing all paths in the cache (when?)
 
 ## Improve GC
@@ -16,3 +16,6 @@
 * Wrap distributed building in a nicer "package"
 * Better substitution configuration
 * Implement speed factor
+
+## Controller
+* Rename cache to controller, integrate Kopf for additional future features.
