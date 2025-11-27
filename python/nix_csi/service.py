@@ -73,7 +73,12 @@ def reboot_cleanup():
 
 
 async def get_current_system():
-    return (await try_captured("nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem")).stdout
+    return (
+        await try_captured(
+            "nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem"
+        )
+    ).stdout
+
 
 def initialize():
     logger.info("Initializing NodeServicer")
@@ -270,8 +275,10 @@ class NodeServicer(csi_grpc.NodeBase):
             errors = []
             targetPath = Path(request.target_path)
 
-            # unmounting might silently fail
             for _ in range(100):
+                if not os.path.ismount(targetPath):
+                    break
+
                 umount = await run_console(
                     "umount", "--recursive", "--verbose", targetPath
                 )
@@ -279,11 +286,6 @@ class NodeServicer(csi_grpc.NodeBase):
                     errors.append(
                         f"umount failed {umount.returncode=} {umount.stderr=}"
                     )
-
-                # exits 0 if there's something to display
-                if await run_captured("findmnt", targetPath) != 0:
-                    break
-
                 await sleep(0.1)
             else:
                 errors.append("Failed to unmount after many retries")
@@ -303,7 +305,7 @@ class NodeServicer(csi_grpc.NodeBase):
                     errors.append(f"volume cleanup failed: {ex}")
 
             if errors:
-                raise GRPCError(Status.INTERNAL, "; ".join(errors))
+                raise GRPCError(Status.INTERNAL, "cleanup failed", "; ".join(errors))
 
             reply = csi_pb2.NodeUnpublishVolumeResponse()
             await stream.send_message(reply)
