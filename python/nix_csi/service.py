@@ -266,46 +266,63 @@ class NodeServicer(csi_grpc.NodeBase):
 
             asyncio.create_task(copyToCache(packagePath))
 
+    @staticmethod
+    async def IsMount(path: Path):
+        return (await run_captured("findmnt", "--mountpoint", path)).returncode == 0
+
+    @staticmethod
+    async def Unmount(path: Path):
+        return await run_captured("umount", "--verbose", path)
+
     async def NodeUnpublishVolume(self, stream):
         request: csi_pb2.NodeUnpublishVolumeRequest | None = await stream.recv_message()
         if request is None:
             raise ValueError("NodeUnpublishVolumeRequest is None")
 
         async with self.volumeLocks[request.volume_id]:
-            errors = []
             targetPath = Path(request.target_path)
 
-            for _ in range(100):
-                if not os.path.ismount(targetPath):
-                    break
-
-                umount = await run_console(
-                    "umount", "--recursive", "--verbose", targetPath
-                )
-                if umount.returncode != 0:
-                    errors.append(
-                        f"umount failed {umount.returncode=} {umount.stderr=}"
+            # Unmount
+            if NodeServicer.IsMount(targetPath):
+                umount = await NodeServicer.unmount(targetPath)
+                if umount.returncode != 0 and NodeServicer.IsMount(targetPath):
+                    raise GRPCError(
+                        Status.INTERNAL, "unmount failed", f"{umount.combined=}"
                     )
-                await sleep(0.1)
-            else:
-                errors.append("Failed to unmount after many retries")
+                else:
+                    logger.debug(f"unmounted {request.target_path=}")
 
+            # Remove mount dir
+            if targetPath.exists():
+                try:
+                    targetPath.rmdir()
+                    logger.debug(f"removed {targetPath=}")
+                except Exception as ex:
+                    raise GRPCError(
+                        Status.INTERNAL, f"removing {targetPath=} failed", ex
+                    )
+
+            # Remove gcroots
             gcPath = CSI_GCROOTS / request.volume_id
             if gcPath.exists():
                 try:
                     gcPath.unlink()
+                    logger.debug(f"unlinked {gcPath=}")
                 except Exception as ex:
-                    errors.append(f"gcroot unlink failed: {ex}")
+                    raise GRPCError(
+                        Status.INTERNAL, f"unlinking {targetPath=} failed", ex
+                    )
 
-            volume_path = CSI_VOLUMES / request.volume_id
-            if volume_path.exists():
+            # Remove hardlink farm
+            volumePath = CSI_VOLUMES / request.volume_id
+            if volumePath.exists():
                 try:
-                    shutil.rmtree(volume_path)
+                    shutil.rmtree(volumePath)
+                    logger.debug(f"removed {volumePath=}")
                 except Exception as ex:
-                    errors.append(f"volume cleanup failed: {ex}")
-
-            if errors:
-                raise GRPCError(Status.INTERNAL, "cleanup failed", "; ".join(errors))
+                    raise GRPCError(
+                        Status.INTERNAL, f"recursive removing {targetPath=} failed", ex
+                    )
 
             reply = csi_pb2.NodeUnpublishVolumeResponse()
             await stream.send_message(reply)
