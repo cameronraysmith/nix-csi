@@ -152,9 +152,15 @@ let
         python
         xonsh
         n2c.skopeo-nix2container
+        pkgs.cachix
+        pkgs.pyright
+        pkgs.ruff
         pkgs.kluctl
+        pkgs.stern
+        pkgs.kubectx
         pkgs.buildah
-        pkgs.step-cli
+        pkgs.skopeo
+        pkgs.regctl
       ];
     };
   };
