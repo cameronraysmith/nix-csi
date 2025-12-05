@@ -12,7 +12,8 @@ let
     ).inputs;
 in
 {
-  pkgs ? import inputs.nixpkgs { },
+  pkgs ? import inputs.nixpkgs { inherit system; },
+  system ? builtins.currentSystem,
   local ? null,
 }:
 let
@@ -29,7 +30,7 @@ let
     "aarch64-linux" = "x86_64-linux";
   };
   pkgsCross = import pkgs.path {
-    system = crossAttrs.${builtins.currentSystem};
+    system = crossAttrs.${system};
     overlays = [ (import ./pkgs) ];
   };
   persys = pkgs: rec {

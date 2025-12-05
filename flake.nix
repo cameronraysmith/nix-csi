@@ -18,5 +18,20 @@
       flake = false;
     };
   };
-  outputs = inputs: { };
+  outputs =
+    inputs:
+    let
+      inherit (inputs.nixpkgs) lib;
+    in
+    {
+      packages = lib.genAttrs [ "aarch64-linux" "x86_64-linux" ] (
+        system:
+        let
+          def = import ./. { inherit system; };
+        in
+        {
+          env = def.env;
+        }
+      );
+    };
 }
