@@ -1,4 +1,9 @@
-{ config, pkgs, lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 let
   cfg = config.nix-csi;
   nsRes = config.kubernetes.resources.${cfg.namespace};
@@ -40,8 +45,16 @@ in
                 initContainers = lib.mkNumberedList {
                   "1" = {
                     name = "initcopy";
-                    image = cfg.image;
-                    command = [ "initcopy" ];
+                    image = "docker.io/nixos/nix:latest";
+                    command = [
+                      "nix"
+                      "build"
+                      "--store"
+                      "/nix-volume"
+                      "--out-link"
+                      "/nix-volume/nix/var/result"
+                      "github:lillecarl/nix-csi#controllerEnv"
+                    ];
                     volumeMounts = lib.mkNamedList {
                       nix-store.mountPath = "/nix-volume";
                       nix-config.mountPath = "/etc/nix";
