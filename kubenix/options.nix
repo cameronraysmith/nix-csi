@@ -16,15 +16,13 @@
       type = lib.types.listOf lib.types.str;
       default = [ ];
     };
-    image = lib.mkOption {
+    version = lib.mkOption {
       type = lib.types.str;
       default =
         let
           pyproject = builtins.fromTOML (builtins.readFile ../python/pyproject.toml);
-          version = pyproject.project.version;
-          image = "quay.io/nix-csi/nix-csi:${version}";
         in
-        image;
+        pyproject.project.version;
     };
     hostMountPath = lib.mkOption {
       description = "Where on the host to put cknix store";

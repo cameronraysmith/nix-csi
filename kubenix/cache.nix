@@ -53,7 +53,7 @@ in
                       "/nix-volume"
                       "--out-link"
                       "/nix-volume/nix/var/result"
-                      "github:lillecarl/nix-csi#controllerEnv"
+                      "github:lillecarl/nix-csi/${cfg.version}#env"
                     ];
                     volumeMounts = lib.mkNamedList {
                       nix-store.mountPath = "/nix-volume";
