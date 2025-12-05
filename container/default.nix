@@ -1,10 +1,6 @@
-# You could easily get tempted to create folders that go into container root
-# using copyToRoot but it's easy to shoot yourself in the foot with Kubernetes
-# mounting it's own shit over those paths making a mess out of your life.
 {
   pkgs,
   dinix,
-  nix2container,
 }:
 let
   lib = pkgs.lib;
@@ -140,22 +136,6 @@ let
       }
     ];
   };
-  initcopy =
-    pkgs.writeScriptBin "initcopy" # bash
-      ''
-        #! ${pkgs.runtimeShell}
-        set -euo pipefail
-        export PATH=${
-          lib.makeBinPath [
-            pkgs.rsync
-            pkgs.lix
-          ]
-        }:$PATH
-        # Copy entire entire container image into volume
-        nix path-info --store local --all | nix copy --store local --to /nix-volume --no-check-sigs --stdin
-        # Link /nix/var/result
-        nix build --store /nix-volume --out-link /nix-volume/nix/var/result ${pathEnv}
-      '';
   pathEnv = pkgs.buildEnv {
     name = "rootEnv";
     paths = with pkgs; [
@@ -172,20 +152,8 @@ let
       iputils
       curl
     ];
+    # So we can peek into eval
+    passthru.dinixEval = dinixEval;
   };
 in
-nix2container.buildImage {
-  name = "nix-csi";
-  initializeNixDatabase = true;
-  maxLayers = 120;
-  config.Env = [
-    "PATH=${
-      lib.makeBinPath [
-        initcopy
-        pathEnv
-      ]
-    }"
-  ];
-  # So we can peek into eval
-  meta.dinixEval = dinixEval;
-}
+pathEnv
