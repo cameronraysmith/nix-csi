@@ -118,6 +118,7 @@ in
 on
 // {
   inherit off;
+  inherit inputs;
 
   uploadScratch =
     let
