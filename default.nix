@@ -122,6 +122,14 @@ on
   inherit off;
   inherit inputs;
 
+  push = pkgs.writeScriptBin "push" # bash
+  ''
+    #! ${pkgs.runtimeShell}
+    export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
+    cachix push nix-csi ${on.env}
+    cachix push nix-csi ${off.env}
+  '';
+
   uploadScratch =
     let
       scratchVersion = "1.0.1";
@@ -133,6 +141,7 @@ on
         #! ${pkgs.runtimeShell}
         set -euo pipefail
         set -x
+        export PATH=${lib.makeBinPath [ pkgs.buildah ]}:$PATH
         # Build and publish scratch image(s)
         container=$(buildah from --platform linux/amd64 scratch)
         buildah config --env "PATH=/nix/var/result/bin" $container

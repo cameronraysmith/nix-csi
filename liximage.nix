@@ -10,12 +10,20 @@ let
       in
       flake-compatish ./.
     ).inputs;
-  pkgs = import inputs.nixpkgs { };
+  pkgs = import inputs.nixpkgs {
+    overlays = [
+      (import ./pkgs)
+    ];
+  };
   inherit (pkgs) lib;
-  inherit (import inputs.nix2container { inherit pkgs; }) nix2container;
+  n2c = import inputs.nix2container { inherit pkgs; };
+  inherit (n2c) nix2container;
+  skopeo = n2c.skopeo-nix2container;
+  server = "ghcr.io";
+  repo = "${server}/lillecarl/nix-csi";
 in
 rec {
-  inherit nix2container pkgs;
+  inherit inputs nix2container pkgs n2c;
   images = lib.genAttrs [ "aarch64-linux" "x86_64-linux" ] (
     system:
     let
@@ -35,11 +43,13 @@ rec {
               ]
             }
             set -x
-            rsync --archive ${pkgs.dockerTools.fakeNss.override {
-              extraGroupLines = [
-                "nixbld:x:30000:"
-              ];
-            }}/ /
+            rsync --archive ${
+              pkgs.dockerTools.fakeNss.override {
+                extraGroupLines = [
+                  "nixbld:x:30000:"
+                ];
+              }
+            }/ /
             mkdir /tmp
             nix \
               build \
@@ -52,7 +62,7 @@ rec {
           '';
     in
     nix2container.buildImage {
-      name = "quay.io/nix-csi/lix";
+      name = "${repo}/lix";
       tag = "${pkgs.lix.version}-${pkgs.stdenv.hostPlatform.system}";
       arch = pkgs.go.GOARCH;
       maxLayers = 127;
@@ -68,17 +78,23 @@ rec {
     }
   );
   push =
+    let
+      copyToRegistry = arch: lib.getExe images.${arch}.copyToRegistry;
+      imageRef = arch: images.${arch}.imageRefUnsafe;
+    in
     pkgs.writeScriptBin "push" # bash
       ''
         #! ${pkgs.runtimeShell}
-        export PATH=${lib.makeBinPath [ pkgs.regctl ]}:$PATH
-        ${lib.getExe images.${"aarch64-linux"}.copyToRegistry}
-        ${lib.getExe images.${"x86_64-linux"}.copyToRegistry}
-        regctl index create quay.io/nix-csi/lix:${pkgs.lix.version} \
-          --ref ${images.${"aarch64-linux"}.imageRefUnsafe} \
-          --ref ${images.${"x86_64-linux"}.imageRefUnsafe}
-        regctl index create quay.io/nix-csi/lix:latest \
-          --ref ${images.${"aarch64-linux"}.imageRefUnsafe} \
-          --ref ${images.${"x86_64-linux"}.imageRefUnsafe}
+        export PATH=${lib.makeBinPath [ pkgs.regctl skopeo ]}:$PATH
+        skopeo login -u="$REPO_USERNAME" -p="$REPO_TOKEN" ${server}
+        regctl registry login -u="$REPO_USERNAME" -p="$REPO_TOKEN" ${server}
+        ${copyToRegistry "aarch64-linux"}
+        ${copyToRegistry "x86_64-linux"}
+        regctl index create ${repo}/lix:${pkgs.lix.version} \
+          --ref ${imageRef "aarch64-linux"} \
+          --ref ${imageRef "x86_64-linux"}
+        regctl index create ${repo}/lix:latest \
+          --ref ${imageRef "aarch64-linux"} \
+          --ref ${imageRef "x86_64-linux"}
       '';
 }
