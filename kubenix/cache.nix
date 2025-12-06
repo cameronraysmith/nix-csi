@@ -45,16 +45,16 @@ in
                 initContainers = lib.mkNumberedList {
                   "1" = {
                     name = "initcopy";
-                    image = "docker.io/nixos/nix:latest";
-                    command = [
-                      "nix"
-                      "build"
-                      "--store"
-                      "/nix-volume"
-                      "--out-link"
-                      "/nix-volume/nix/var/result"
-                      "github:lillecarl/nix-csi/${cfg.version}#env"
-                    ];
+                    image = "quay.io/nix-csi/lix:${pkgs.lix.version}";
+                    imagePullPolicy = "Always";
+                    securityContext.privileged = true; # chroot store
+                    env =
+                      lib.mkNamedList {
+                        TAG.value = cfg.version;
+                      }
+                      // lib.optionalAttrs (lib.stringLength (builtins.getEnv "GITHUB_KEY") > 0) {
+                        NIX_CONFIG.value = "access-tokens = github.com=${builtins.getEnv "GITHUB_KEY"}";
+                      };
                     volumeMounts = lib.mkNamedList {
                       nix-store.mountPath = "/nix-volume";
                       nix-config.mountPath = "/etc/nix";
