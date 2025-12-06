@@ -283,9 +283,9 @@ class NodeServicer(csi_grpc.NodeBase):
             targetPath = Path(request.target_path)
 
             # Unmount
-            if NodeServicer.IsMount(targetPath):
-                umount = await NodeServicer.unmount(targetPath)
-                if umount.returncode != 0 and NodeServicer.IsMount(targetPath):
+            if await NodeServicer.IsMount(targetPath):
+                umount = await NodeServicer.Unmount(targetPath)
+                if umount.returncode != 0 and await NodeServicer.IsMount(targetPath):
                     raise GRPCError(
                         Status.INTERNAL, "unmount failed", f"{umount.combined=}"
                     )
