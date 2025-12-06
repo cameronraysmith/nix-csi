@@ -103,6 +103,8 @@ class NodeServicer(csi_grpc.NodeBase):
         if request is None:
             raise ValueError("NodePublishVolumeRequest is None")
 
+        logger.info(f"Publish {request.target_path}")
+
         async with self.volumeLocks[request.volume_id]:
             targetPath = Path(request.target_path)
             storePath = request.volume_context.get(self.system)
@@ -278,6 +280,8 @@ class NodeServicer(csi_grpc.NodeBase):
         request: csi_pb2.NodeUnpublishVolumeRequest | None = await stream.recv_message()
         if request is None:
             raise ValueError("NodeUnpublishVolumeRequest is None")
+
+        logger.info(f"Unpublish {request.target_path}")
 
         async with self.volumeLocks[request.volume_id]:
             targetPath = Path(request.target_path)
