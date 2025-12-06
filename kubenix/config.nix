@@ -121,6 +121,8 @@ in
           ];
           builders-use-substitutes = true;
           warn-dirty = false;
+          narinfo-cache-negative-ttl = 0;
+          narinfo-cache-positive-ttl = 0;
         };
       in
       {
