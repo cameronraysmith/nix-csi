@@ -5,7 +5,6 @@
     ./namespace.nix
     ./daemonset.nix
     ./csidriver.nix
-    ./storageclass.nix
     ./config.nix
     ./cache.nix
     ./rbac.nix
