@@ -1,4 +1,6 @@
 name: "CI"
+on:
+  push:
 env:
   # Used by scripts to push container images
   REPO_USERNAME: ${{ github.actor }}
