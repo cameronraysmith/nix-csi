@@ -167,7 +167,7 @@ on
       ''
         #! ${pkgs.runtimeShell}
         export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
-        cachix push ${kubenixEval.manifestJSONFile}
+        cachix push nix-csi ${kubenixPush.manifestJSONFile}
       '';
 
   uploadScratch =
