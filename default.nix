@@ -183,6 +183,7 @@ on
         set -x
         export PATH=${lib.makeBinPath [ pkgs.buildah ]}:$PATH
         # Build and publish scratch image(s)
+        buildah login -u="$REPO_USERNAME" -p="$REPO_TOKEN" ghcr.io
         container=$(buildah from --platform linux/amd64 scratch)
         buildah config --env "PATH=/nix/var/result/bin" $container
         buildah commit $container ${scratchUrl on.pkgs.stdenv.hostPlatform.system}
