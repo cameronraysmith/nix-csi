@@ -34,7 +34,7 @@ in
                 {
                   name = "ctest";
                   command = [ pkg.${system}.meta.mainProgram ];
-                  image = "quay.io/nix-csi/scratch:1.0.1";
+                  image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
                   volumeMounts = lib.mkNamedList {
                     nix-csi.mountPath = "/nix";
                   };

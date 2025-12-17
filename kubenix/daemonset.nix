@@ -38,7 +38,7 @@ in
                 initContainers = lib.mkNumberedList {
                   "1" = {
                     name = "initcopy";
-                    image = "quay.io/nix-csi/lix:${pkgs.lix.version}";
+                    image = "ghcr.io/lillecarl/nix-csi/lix:${pkgs.lix.version}";
                     imagePullPolicy = "Always";
                     securityContext.privileged = true; # chroot store
                     env =
@@ -58,7 +58,7 @@ in
                 };
                 containers = lib.mkNamedList {
                   nix-node = {
-                    image = "quay.io/nix-csi/scratch:1.0.1";
+                    image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
                     command = [
                       "dinit"
                       "--log-file"

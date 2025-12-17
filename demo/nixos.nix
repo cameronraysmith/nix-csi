@@ -49,7 +49,7 @@ let
           containers = {
             _namedlist = true; # This is a meta thing to use attrsets instead of lists
             hello = {
-              image = "quay.io/nix-csi/scratch:1.0.1"; # 1.0.1 sets PATH to /nix/var/result/bin
+              image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1"; # 1.0.1 sets PATH to /nix/var/result/bin
               command = [
                 "/nix/var/result/init"
                 "--system"

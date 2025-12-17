@@ -45,7 +45,7 @@ in
                 initContainers = lib.mkNumberedList {
                   "1" = {
                     name = "initcopy";
-                    image = "quay.io/nix-csi/lix:${pkgs.lix.version}";
+                    image = "ghcr.io/lillecarl/nix-csi/lix:${pkgs.lix.version}";
                     imagePullPolicy = "Always";
                     securityContext.privileged = true; # chroot store
                     env =
@@ -70,7 +70,7 @@ in
                       "--quiet"
                       "cache"
                     ];
-                    image = "quay.io/nix-csi/scratch:1.0.1";
+                    image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
                     env = lib.mkNamedList {
                       HOME.value = "/nix/var/nix-csi/root";
                       KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";

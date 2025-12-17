@@ -131,8 +131,8 @@ on
   uploadScratch =
     let
       scratchVersion = "1.0.1";
-      scratchUrl = system: "quay.io/nix-csi/scratch:${scratchVersion}-${system}";
-      scratchManifest = "quay.io/nix-csi/scratch:${scratchVersion}";
+      scratchUrl = system: "ghcr.io/lillecarl/nix-csi/scratch:${scratchVersion}-${system}";
+      scratchManifest = "ghcr.io/lillecarl/nix-csi/scratch:${scratchVersion}";
     in
     pkgs.writeScriptBin "merge" # bash
       ''
