@@ -51,6 +51,15 @@ rec {
               }
             }/ /
             mkdir /tmp
+            export ARCH=$(nix eval --raw --impure --expr builtins.currentSystem)
+            case "$ARCH" in
+              "x86_64-linux")
+                export ARCH=amd64
+              ;;
+              "aarch64-linux")
+                export ARCH=arm64
+              ;;
+            esac
             nix \
               build \
                 --max-jobs auto \
@@ -58,7 +67,7 @@ rec {
                 --store /nix-volume \
                 --out-link /nix-volume/nix/var/result \
                 --fallback \
-                github:lillecarl/nix-csi/$TAG#env
+                ''${!ARCH}
           '';
     in
     nix2container.buildImage {

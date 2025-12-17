@@ -17,7 +17,7 @@ in
   local ? null,
 }:
 let
-  pkgs' = pkgs.extend (import ./pkgs inputs.dinix);
+  pkgs' = pkgs.extend (import ./pkgs);
 in
 let
   pkgs = pkgs';
@@ -29,54 +29,92 @@ let
   };
   pkgsCross = import pkgs.path {
     system = crossAttrs.${system};
-    overlays = [ (import ./pkgs inputs.dinix) ];
+    overlays = [ (import ./pkgs) ];
   };
   easykubenix = import inputs.easykubenix;
-  kubenixEval = easykubenix {
-    inherit pkgs;
+  kubenixApply = kubenixInstance {
     specialArgs = {
-      inherit pkgsCross;
-    };
-    modules = [
-      ./kubenix
-      {
-        config.nix-csi.authorizedKeys = lib.pipe (lib.filesystem.listFilesRecursive ./keys) [
-          (lib.filter (name: lib.hasSuffix ".pub" name))
-          (lib.map (name: builtins.readFile name))
-          (lib.map (key: lib.trim key))
-        ];
-      }
-      {
-        config = {
-          nix-csi = {
-            enable = true;
-            version = "develop";
-            cache.storageClassName = "hcloud-volumes";
+      nix-csi = {
+        ${pkgs.stdenv.hostPlatform.system} = builtins.unsafeDiscardStringContext (
+          import ./container {
+            inherit pkgs;
+            inherit (inputs) dinix;
           }
-          // lib.optionalAttrs (local != null) {
-            cache.storageClassName = "local-path";
-            ctest = {
+        );
+        ${pkgsCross.stdenv.hostPlaform.system} = builtins.unsafeDiscardStringContext (
+          import ./container {
+            pkgs = pkgsCross;
+            inherit (inputs) dinix;
+          }
+        );
+      };
+    };
+  };
+  kubenixPush = kubenixInstance {
+    specialArgs = {
+      nix-csi = {
+        ${pkgs.stdenv.hostPlatform.system} = (
+          import ./container {
+            inherit pkgs;
+            inherit (inputs) dinix;
+          }
+        );
+        ${pkgsCross.stdenv.hostPlatform.system} = (
+          import ./container {
+            pkgs = pkgsCross;
+            inherit (inputs) dinix;
+          }
+        );
+      };
+    };
+  };
+  kubenixInstance =
+    {
+      specialArgs ? { },
+    }:
+    easykubenix {
+      inherit pkgs;
+      inherit specialArgs;
+      modules = [
+        ./kubenix
+        {
+          config.nix-csi.authorizedKeys = lib.pipe (lib.filesystem.listFilesRecursive ./keys) [
+            (lib.filter (name: lib.hasSuffix ".pub" name))
+            (lib.map (name: builtins.readFile name))
+            (lib.map (key: lib.trim key))
+          ];
+        }
+        {
+          config = {
+            nix-csi = {
               enable = true;
-              replicas = 1;
+              version = "develop";
+              cache.storageClassName = "hcloud-volumes";
+            }
+            // lib.optionalAttrs (local != null) {
+              cache.storageClassName = "local-path";
+              ctest = {
+                enable = true;
+                replicas = 1;
+              };
+            };
+            kluctl = {
+              discriminator = "nix-csi";
+            }
+            // lib.optionalAttrs (local != null) {
+              preDeployScript =
+                pkgs.writeScriptBin "preDeployScript" # bash
+                  ''
+                    #! ${pkgs.runtimeShell}
+                    set -euo pipefail
+                    set -x
+                    nix copy --no-check-sigs --to ssh-ng://nix@192.168.88.20 "$1" -v || true
+                  '';
             };
           };
-          kluctl = {
-            discriminator = "nix-csi";
-          }
-          // lib.optionalAttrs (local != null) {
-            preDeployScript =
-              pkgs.writeScriptBin "preDeployScript" # bash
-                ''
-                  #! ${pkgs.runtimeShell}
-                  set -euo pipefail
-                  set -x
-                  nix copy --no-check-sigs --to ssh-ng://nix@192.168.88.20 "$1" -v || true
-                '';
-          };
-        };
-      }
-    ];
-  };
+        }
+      ];
+    };
 
   persys = pkgs: rec {
     inherit pkgs lib;
@@ -117,8 +155,12 @@ let
 in
 on
 // {
-  inherit off;
-  inherit inputs;
+  inherit
+    on
+    off
+    inputs
+    kubenixApply
+    ;
 
   push =
     pkgs.writeScriptBin "push" # bash
