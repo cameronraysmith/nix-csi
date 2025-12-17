@@ -22,15 +22,16 @@
     inputs:
     let
       inherit (inputs.nixpkgs) lib;
+      gen = func: lib.genAttrs [ "aarch64-linux" "x86_64-linux" ] func;
     in
     {
-      packages = lib.genAttrs [ "aarch64-linux" "x86_64-linux" ] (
+      packages = gen (
         system:
         let
-          def = import ./. { inherit system; };
+          pkgs = import inputs.nixpkgs { inherit system; };
         in
         {
-          env = def.env;
+          inherit (pkgs) hello;
         }
       );
     };
