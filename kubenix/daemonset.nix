@@ -1,6 +1,7 @@
 {
   config,
   pkgs,
+  pkgsCross,
   lib,
   ...
 }:
@@ -43,6 +44,8 @@ in
                     env =
                       lib.mkNamedList {
                         TAG.value = cfg.version;
+                        ${pkgs.stdenv.hostPlatform.system}.value = pkgs.nix-node-env;
+                        ${pkgsCross.stdenv.hostPlatform.system}.value = pkgs.nix-node-env;
                       }
                       // lib.optionalAttrs (lib.stringLength (builtins.getEnv "GITHUB_KEY") > 0) {
                         NIX_CONFIG.value = "access-tokens = github.com=${builtins.getEnv "GITHUB_KEY"}";

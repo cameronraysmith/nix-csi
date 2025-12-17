@@ -17,13 +17,11 @@ in
   local ? null,
 }:
 let
-  pkgs' = pkgs.extend (import ./pkgs);
+  pkgs' = pkgs.extend (import ./pkgs inputs.dinix);
 in
 let
   pkgs = pkgs';
   lib = pkgs.lib;
-
-  dinix = inputs.dinix;
 
   crossAttrs = {
     "x86_64-linux" = "aarch64-linux";
@@ -31,57 +29,57 @@ let
   };
   pkgsCross = import pkgs.path {
     system = crossAttrs.${system};
-    overlays = [ (import ./pkgs) ];
+    overlays = [ (import ./pkgs inputs.dinix) ];
   };
-  persys = pkgs: rec {
-    inherit pkgs lib;
-    easykubenix = import inputs.easykubenix;
-
-    # kubenix evaluation
-    kubenixEval = easykubenix {
-      inherit pkgs;
-      modules = [
-        ./kubenix
-        {
-          config.nix-csi.authorizedKeys = lib.pipe (lib.filesystem.listFilesRecursive ./keys) [
-            (lib.filter (name: lib.hasSuffix ".pub" name))
-            (lib.map (name: builtins.readFile name))
-            (lib.map (key: lib.trim key))
-          ];
-        }
-        {
-          config = {
-            nix-csi = {
+  easykubenix = import inputs.easykubenix;
+  kubenixEval = easykubenix {
+    inherit pkgs;
+    specialArgs = {
+      inherit pkgsCross;
+    };
+    modules = [
+      ./kubenix
+      {
+        config.nix-csi.authorizedKeys = lib.pipe (lib.filesystem.listFilesRecursive ./keys) [
+          (lib.filter (name: lib.hasSuffix ".pub" name))
+          (lib.map (name: builtins.readFile name))
+          (lib.map (key: lib.trim key))
+        ];
+      }
+      {
+        config = {
+          nix-csi = {
+            enable = true;
+            version = "develop";
+            cache.storageClassName = "hcloud-volumes";
+          }
+          // lib.optionalAttrs (local != null) {
+            cache.storageClassName = "local-path";
+            ctest = {
               enable = true;
-              version = "develop";
-              cache.storageClassName = "hcloud-volumes";
-            }
-            // lib.optionalAttrs (local != null) {
-              cache.storageClassName = "local-path";
-              ctest = {
-                enable = true;
-                replicas = 1;
-              };
-            };
-            kluctl = {
-              discriminator = "nix-csi";
-            }
-            // lib.optionalAttrs (local != null) {
-              preDeployScript =
-                pkgs.writeScriptBin "preDeployScript" # bash
-                  ''
-                    #! ${pkgs.runtimeShell}
-                    set -euo pipefail
-                    set -x
-                    nix copy --no-check-sigs --to ssh-ng://nix@192.168.88.20 "$1" -v || true
-                  '';
+              replicas = 1;
             };
           };
-        }
-      ];
-    };
+          kluctl = {
+            discriminator = "nix-csi";
+          }
+          // lib.optionalAttrs (local != null) {
+            preDeployScript =
+              pkgs.writeScriptBin "preDeployScript" # bash
+                ''
+                  #! ${pkgs.runtimeShell}
+                  set -euo pipefail
+                  set -x
+                  nix copy --no-check-sigs --to ssh-ng://nix@192.168.88.20 "$1" -v || true
+                '';
+          };
+        };
+      }
+    ];
+  };
 
-    env = import ./container { inherit pkgs dinix; };
+  persys = pkgs: rec {
+    inherit pkgs lib;
 
     pypkgs = (
       pypkgs: with pypkgs; [
@@ -122,13 +120,13 @@ on
   inherit off;
   inherit inputs;
 
-  push = pkgs.writeScriptBin "push" # bash
-  ''
-    #! ${pkgs.runtimeShell}
-    export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
-    cachix push nix-csi ${on.env}
-    cachix push nix-csi ${off.env}
-  '';
+  push =
+    pkgs.writeScriptBin "push" # bash
+      ''
+        #! ${pkgs.runtimeShell}
+        export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
+        cachix push ${kubenixEval.manifestJSONFile}
+      '';
 
   uploadScratch =
     let

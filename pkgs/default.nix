@@ -1,4 +1,4 @@
-self: pkgs: {
+dinix: self: pkgs: {
   # Overlay lib
   lib = pkgs.lib.extend (import ../lib);
 
@@ -16,6 +16,8 @@ self: pkgs: {
   nix-csi = self.csi-root.csi;
   nix-cache = self.csi-root.cache;
   nix-timegc = self.csi-root.timegc;
+  nix-node-env = import ../container { inherit pkgs dinix; };
+  nix-cache-env = import ../container { inherit pkgs dinix; };
   csi-root = pkgs.python3Packages.callPackage ../python {
     inherit (self) csi-proto-python kr8s;
   };
