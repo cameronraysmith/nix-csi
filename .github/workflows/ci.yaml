@@ -1,10 +1,9 @@
 name: "CI"
-on:
-  push:
-  workflow_dispatch:
 env:
+  # Used by scripts to push container images
   REPO_USERNAME: ${{ github.actor }}
   REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 jobs:
   build-and-test:
@@ -13,28 +12,17 @@ jobs:
       contents: read
       packages: write 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@master
-      - name: Install Nix
-        uses: nixbuild/nix-quick-install-action@master
+      - uses: actions/checkout@main
+
+      - name: Setup Nix environment
+        uses: ./.github/actions/setup-nix
         with:
-          nix_conf: |
-            trusted-public-keys =  cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= cache.lix.systems:aBnZUw8zA7H35Cz2RyKFVs3H4PlGTLawyY5KRbvJR8o= nixbuild.net/CHEAKK-1:IvfuR1Ldmkef8pMcSuCl9N2jppEb8KpBzdoB8uKQdxE= nix-csi.cachix.org-1:i4w33gR4efO67jpz8U7g/MdvRQ6mQ3LEF9fB8tES60g=
-            builders = eu.nixbuild.net aarch64-linux;eu.nixbuild.net x86_64-linux
-            substituters = https://cache.nixos.org?priority=1 https://nix-csi.cachix.org?priority=2 https://cache.lix.systems?priority=3 ssh://eu.nixbuild.net?priority=4
-      - name: Configure SSH Keys
-        shell: bash # Use bash for simple key plumbing
-        env:
-          SSH_KEY: ${{ secrets.NIXBUILD_KEY }}
+          nixbuild_key: ${{ secrets.NIXBUILD_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run build
         run: |
-          # 1. Setup runner user key
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          echo -e "Host *\n\tStrictHostKeyChecking no" | sudo tee -a ~/.ssh/config > /dev/null
-      - name: Run Build
-        run: |
-          echo "Running liximage build and push"
+          # Push Lix image
           nix run --file liximage.nix push
-          echo "Running environment build and push"
+          # Push application environment
           nix run --file default.nix push

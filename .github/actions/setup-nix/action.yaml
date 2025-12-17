@@ -1,0 +1,31 @@
+name: "Setup Nix & Caches"
+description: "Installs Nix, configures Nixbuild SSH, and sets up substituters"
+inputs:
+  nixbuild_key:
+    description: "Private SSH key for Nixbuild"
+    required: true
+  github_token:
+    description: "GitHub Token for API access"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Nix
+      uses: nixbuild/nix-quick-install-action@master
+      with:
+        nix_conf: |
+          experimental-features = nix-command flakes
+          access-tokens = github.com=${{ inputs.github_token }}
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= cache.lix.systems:aBnZUw8zA7H35Cz2RyKFVs3H4PlGTLawyY5KRbvJR8o= nixbuild.net/CHEAKK-1:IvfuR1Ldmkef8pMcSuCl9N2jppEb8KpBzdoB8uKQdxE= nix-csi.cachix.org-1:i4w33gR4efO67jpz8U7g/MdvRQ6mQ3LEF9fB8tES60g=
+          builders = eu.nixbuild.net aarch64-linux;eu.nixbuild.net x86_64-linux
+          substituters = https://cache.nixos.org?priority=1 https://nix-csi.cachix.org?priority=2 https://cache.lix.systems?priority=3 ssh://eu.nixbuild.net?priority=4
+
+    - name: Configure SSH Keys
+      shell: bash
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ inputs.nixbuild_key }}" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        echo -e "Host *\n\tStrictHostKeyChecking no" | sudo tee -a ~/.ssh/config > /dev/null
+
