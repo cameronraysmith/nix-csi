@@ -28,3 +28,5 @@ jobs:
           nix run --file liximage.nix push
           # Push application environment
           nix run --file default.nix push
+          # upload scratch image
+          nix run --file default.nix uploadCsi
