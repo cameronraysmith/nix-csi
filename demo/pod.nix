@@ -1,53 +1,70 @@
-{
-  pkgs ? import <nixpkgs> { },
-}:
 let
+  inputs =
+    (
+      let
+        lockFile = builtins.readFile ../flake.lock;
+        lockAttrs = builtins.fromJSON lockFile;
+        fcLockInfo = lockAttrs.nodes.flake-compatish.locked;
+        fcSrc = builtins.fetchTree fcLockInfo;
+        flake-compatish = import fcSrc;
+      in
+      flake-compatish ../.
+    ).inputs;
+
+  pkgs = import inputs.nixpkgs { };
   sysMap = {
     "x86_64-linux" = "aarch64-linux";
     "aarch64-linux" = "x86_64-linux";
   };
-  pkgsCrossish = import pkgs.path { system = sysMap.${builtins.currentSystem}; };
+  pkgsCross = import pkgs.path { system = sysMap.${builtins.currentSystem}; };
+
+  package = pkgs:  pkgs.buildEnv {
+    name = "demoEnv";
+    paths = [
+      pkgs.bash
+      pkgs.fishMinimal
+      pkgs.coreutils
+      pkgs.moreutils
+      pkgs.lix
+    ];
+  };
 
   # You can use flakes, npins, niv, fetchTree, fetchFromGitHub or whatever.
-  easykubenix = builtins.fetchTree {
-    type = "github";
-    owner = "lillecarl";
-    repo = "easykubenix";
-  };
-  ekn = import easykubenix {
+  ekn = import inputs.easykubenix {
     inherit pkgs;
     modules = [
-      {
-        kluctl = {
-          discriminator = "demodeploy"; # Used for kluctl pruning (removing resources not in generated manifests)
-          pushManifest = {
-            enable = true; # Push manifest (which depends on pkgs.hello) before deploying
-            to = "ssh://root@192.168.88.20"; # Shouldn't be root but here we are currently, maybe shouldn't be a module option either?
+      (
+        { lib, ... }:
+        {
+          kluctl = {
+            discriminator = "demodeploy"; # Used for kluctl pruning (removing resources not in generated manifests)
           };
-        };
-        kubernetes.resources.none.Pod.hello.spec = {
-          containers = {
-            _namedlist = true; # This is a meta thing to use attrsets instead of lists
-            hello = {
-              image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1"; # 1.0.1 sets PATH to /nix/var/result/bin
-              command = [ "hello" ];
-              volumeMounts = {
-                _namedlist = true;
-                nix.mountPath = "/nix";
+          # Will go into the default namespace
+          kubernetes.resources.none.Pod.hello.spec = {
+            containers = lib.mkNamedList {
+              hello = {
+                image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1"; # 1.0.1 sets PATH to /nix/var/result/bin
+                command = [ "bash" "-c" "hello;sleep infinity" ];
+                volumeMounts = lib.mkNamedList {
+                  nix.mountPath = "/nix";
+                };
+              };
+            };
+            # lib.mkNamedList adds metadata that tells easykubenix to convert the atrributeset
+            # into a list of attrset with name attribute set
+            volumes = lib.mkNamedList {
+              nix.csi = {
+                driver = "nix.csi.store";
+                # these are stringified into storePaths now the manifest depends
+                # on pkgs.hello so when we push it we bring the package environment and nix-csi
+                # can fetch it.
+                volumeAttributes.${pkgs.stdenv.hostPlatform.system} = package pkgs;
+                volumeAttributes.${pkgsCross.stdenv.hostPlatform.system} = package pkgsCross;
               };
             };
           };
-          volumes = {
-            _namedlist = true;
-            nix.csi = {
-              driver = "nix.csi.store";
-              volumeAttributes.${pkgs.stdenv.hostPlatform.system} = pkgs.hello; # this is stringified into a storepath,
-              volumeAttributes.${pkgsCrossish.stdenv.hostPlatform.system} = pkgsCrossish.hello; # this is stringified into a storepath,
-              # Now the manifest depends on pkgs.hello so when we push it we bring pkgs.hello and nix-csi can fetch it.
-            };
-          };
-        };
-      }
+        }
+      )
     ];
   };
 in
