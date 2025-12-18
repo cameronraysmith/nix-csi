@@ -175,7 +175,7 @@ on
       scratchUrl = system: "ghcr.io/lillecarl/nix-csi/scratch:${scratchVersion}-${system}";
       scratchManifest = "ghcr.io/lillecarl/nix-csi/scratch:${scratchVersion}";
     in
-    pkgs.writeScriptBin "merge" # bash
+    pkgs.writeScriptBin "uploadScratch" # bash
       ''
         #! ${pkgs.runtimeShell}
         set -euo pipefail
