@@ -89,7 +89,6 @@ let
             nix-csi = {
               enable = true;
               version = "develop";
-              cache.storageClassName = "hcloud-volumes";
             }
             // lib.optionalAttrs (local != null) {
               cache.storageClassName = "local-path";
