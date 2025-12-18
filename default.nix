@@ -41,7 +41,7 @@ let
             inherit (inputs) dinix;
           }
         );
-        ${pkgsCross.stdenv.hostPlaform.system} = builtins.unsafeDiscardStringContext (
+        ${pkgsCross.stdenv.hostPlatform.system} = builtins.unsafeDiscardStringContext (
           import ./container {
             pkgs = pkgsCross;
             inherit (inputs) dinix;
