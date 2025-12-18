@@ -2,6 +2,7 @@
   config,
   pkgs,
   lib,
+  nix-csi,
   ...
 }:
 let
@@ -51,6 +52,8 @@ in
                     env =
                       lib.mkNamedList {
                         TAG.value = cfg.version;
+                        amd64.value = nix-csi.x86_64-linux;
+                        arm64.value = nix-csi.aarch64-linux;
                       }
                       // lib.optionalAttrs (lib.stringLength (builtins.getEnv "GITHUB_KEY") > 0) {
                         NIX_CONFIG.value = "access-tokens = github.com=${builtins.getEnv "GITHUB_KEY"}";
