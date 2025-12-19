@@ -4,7 +4,7 @@ import os
 import shutil
 import socket
 import math
-import subprocess
+import tempfile
 
 from csi import csi_grpc, csi_pb2
 from grpclib import GRPCError
@@ -109,6 +109,8 @@ class NodeServicer(csi_grpc.NodeBase):
             targetPath = Path(request.target_path)
             storePath = request.volume_context.get(self.system, None)
             flakeRef = request.volume_context.get("flakeRef", None)
+            nixExpr = request.volume_context.get("nixExpr", None)
+
             packagePath: Path = Path("/nonexistent/path/that/should/never/exist")
             gcPath = CSI_GCROOTS / request.volume_id
 
@@ -138,9 +140,22 @@ class NodeServicer(csi_grpc.NodeBase):
                     flakeRef,
                 )
                 packagePath = Path(result.stdout.splitlines()[0])
+            elif nixExpr is not None:
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".nix") as tmp:
+                    tmp.write(nixExpr)
+                    tmp.flush()
 
                     # Fetch storePath from caches
-                    await try_console(*buildCommand)
+                    result = await try_console(
+                        "nix",
+                        "build",
+                        "--print-out-paths",
+                        "--out-link",
+                        gcPath,
+                        "--file",
+                        tmp.name,
+                    )
+                    packagePath = Path(result.stdout.splitlines()[0])
             else:
                 raise GRPCError(
                     Status.INVALID_ARGUMENT,
