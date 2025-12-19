@@ -78,23 +78,27 @@ in
   };
   config =
     let
+      # Watch this fall apart when we're adding more architectures
       crossAttrs = {
         "x86_64-linux" = "aarch64-linux";
         "aarch64-linux" = "x86_64-linux";
       };
+      system = pkgs.stdenv.hostPlatform.system;
+      systemCross = crossAttrs.${system};
+
       pkgs = import cfg.pkgs {
         overlays = [ (import ../pkgs) ];
       };
       pkgsCross = import cfg.pkgs {
-        system = crossAttrs.${pkgs.stdenv.hostPlatform.system};
+        system = systemCross;
         overlays = [ (import ../pkgs) ];
       };
       package = {
-        ${pkgs.stdenv.hostPlatform.system} = import ../container {
+        ${system} = import ../container {
           inherit pkgs;
           inherit (cfg) dinix;
         };
-        ${pkgsCross.stdenv.hostPlatform.system} = import ../container {
+        ${systemCross} = import ../container {
           pkgs = pkgsCross;
           inherit (cfg) dinix;
         };

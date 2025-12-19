@@ -12,35 +12,22 @@ let
     ).inputs;
 in
 {
-  pkgs ? import inputs.nixpkgs { inherit system; },
+  pkgs ? import inputs.nixpkgs {
+    inherit system;
+    overlays = [ (import ./pkgs) ];
+  },
   system ? builtins.currentSystem,
   local ? null,
 }:
-let
-  pkgs' = pkgs.extend (import ./pkgs);
-in
-let
-  pkgs = pkgs';
+rec {
   lib = pkgs.lib;
 
-  crossAttrs = {
-    "x86_64-linux" = "aarch64-linux";
-    "aarch64-linux" = "x86_64-linux";
-  };
-  pkgsCross = import pkgs.path {
-    system = crossAttrs.${system};
-    overlays = [ (import ./pkgs) ];
-  };
   easykubenix = import inputs.easykubenix;
   kubenixApply = kubenixInstance {
-    module = {
-      nix-csi.dinix = inputs.dinix;
-    };
   };
   kubenixPush = kubenixInstance {
     module = {
       nix-csi.push = true;
-      nix-csi.dinix = inputs.dinix;
     };
   };
   kubenixInstance =
@@ -90,51 +77,34 @@ let
       ];
     };
 
-  persys = pkgs: rec {
-    inherit pkgs lib;
-
-    pypkgs = (
-      pypkgs: with pypkgs; [
-        pkgs.nix-csi
-        pkgs.csi-proto-python
-        pkgs.kr8s
-      ]
-    );
-    python = pkgs.python3.withPackages pypkgs;
-    xonsh = pkgs.xonsh.override {
-      extraPackages = pypkgs;
-    };
-    # env to add to PATH with direnv
-    repoenv = pkgs.buildEnv {
-      name = "repoenv";
-      paths = [
-        python
-        xonsh
-        pkgs.cachix
-        pkgs.pyright
-        pkgs.ruff
-        pkgs.kluctl
-        pkgs.stern
-        pkgs.kubectx
-        pkgs.buildah
-        pkgs.skopeo
-        pkgs.regctl
-      ];
-    };
+  pypkgs = (
+    pypkgs: with pypkgs; [
+      pkgs.nix-csi
+      pkgs.csi-proto-python
+      pkgs.kr8s
+    ]
+  );
+  python = pkgs.python3.withPackages pypkgs;
+  xonsh = pkgs.xonsh.override {
+    extraPackages = pypkgs;
   };
-in
-let
-  on = persys pkgs;
-  off = persys pkgsCross;
-in
-on
-// {
-  inherit
-    on
-    off
-    inputs
-    kubenixApply
-    ;
+  # env to add to PATH with direnv
+  repoenv = pkgs.buildEnv {
+    name = "repoenv";
+    paths = [
+      python
+      xonsh
+      pkgs.cachix
+      pkgs.pyright
+      pkgs.ruff
+      pkgs.kluctl
+      pkgs.stern
+      pkgs.kubectx
+      pkgs.buildah
+      pkgs.skopeo
+      pkgs.regctl
+    ];
+  };
 
   push =
     pkgs.writeScriptBin "push" # bash
@@ -160,16 +130,16 @@ on
         buildah login -u="$REPO_USERNAME" -p="$REPO_TOKEN" ghcr.io
         container=$(buildah from --platform linux/amd64 scratch)
         buildah config --env "PATH=/nix/var/result/bin" $container
-        buildah commit $container ${scratchUrl on.pkgs.stdenv.hostPlatform.system}
-        buildah push ${scratchUrl on.pkgs.stdenv.hostPlatform.system}
+        buildah commit $container ${scratchUrl "x86_64-linux"}
+        buildah push ${scratchUrl "x86_64-linux"}
         container=$(buildah from --platform linux/arm64 scratch)
         buildah config --env "PATH=/nix/var/result/bin" $container
-        buildah commit $container ${scratchUrl off.pkgs.stdenv.hostPlatform.system}
-        buildah push ${scratchUrl off.pkgs.stdenv.hostPlatform.system}
+        buildah commit $container ${scratchUrl "aarch64-linux"}
+        buildah push ${scratchUrl "aarch64-linux"}
         buildah manifest rm ${scratchManifest} &>/dev/null || true
         buildah manifest create ${scratchManifest}
-        buildah manifest add ${scratchManifest} ${scratchUrl on.pkgs.stdenv.hostPlatform.system}
-        buildah manifest add ${scratchManifest} ${scratchUrl off.pkgs.stdenv.hostPlatform.system}
+        buildah manifest add ${scratchManifest} ${scratchUrl "x86_64-linux"}
+        buildah manifest add ${scratchManifest} ${scratchUrl "aarch64-linux"}
         buildah manifest push ${scratchManifest}
       '';
 }
