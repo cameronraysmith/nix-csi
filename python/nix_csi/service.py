@@ -107,7 +107,8 @@ class NodeServicer(csi_grpc.NodeBase):
 
         async with self.volumeLocks[request.volume_id]:
             targetPath = Path(request.target_path)
-            storePath = request.volume_context.get(self.system)
+            storePath = request.volume_context.get(self.system, None)
+            flakeRef = request.volume_context.get("flakeRef", None)
             packagePath: Path = Path("/nonexistent/path/that/should/never/exist")
             gcPath = CSI_GCROOTS / request.volume_id
 
@@ -115,13 +116,28 @@ class NodeServicer(csi_grpc.NodeBase):
                 packagePath = Path(storePath)
                 if not packagePath.exists():
                     logger.debug(f"{storePath=}")
-                    buildCommand = [
+
+                    # Fetch storePath from caches
+                    await try_console(
                         "nix",
                         "build",
                         "--out-link",
                         gcPath,
                         packagePath,
-                    ]
+                    )
+            elif flakeRef is not None:
+                logger.debug(f"{flakeRef=}")
+
+                # Fetch storePath from caches
+                result = await try_console(
+                    "nix",
+                    "build",
+                    "--print-out-paths",
+                    "--out-link",
+                    gcPath,
+                    flakeRef,
+                )
+                packagePath = Path(result.stdout.splitlines()[0])
 
                     # Fetch storePath from caches
                     await try_console(*buildCommand)
