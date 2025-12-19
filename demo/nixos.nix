@@ -38,11 +38,6 @@ let
       {
         kluctl = {
           discriminator = "demodeploy"; # Used for kluctl pruning (removing resources not in generated manifests)
-          pushManifest = {
-            enable = true; # Push manifest (which depends on pkgs.hello) before deploying
-            to = "ssh://root@192.168.88.20"; # Shouldn't be root but here we are currently, maybe shouldn't be a module option either?
-            failCachePush = true;
-          };
         };
         kubernetes.resources.none.Pod.nixos.spec = {
           automountServiceAccountToken = false;

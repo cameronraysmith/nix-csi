@@ -1,4 +1,23 @@
-{ lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
+let
+  cfg = config.nix-csi;
+  inputs =
+    (
+      let
+        lockFile = builtins.readFile ../flake.lock;
+        lockAttrs = builtins.fromJSON lockFile;
+        fcLockInfo = lockAttrs.nodes.flake-compatish.locked;
+        fcSrc = builtins.fetchTree fcLockInfo;
+        flake-compatish = import fcSrc;
+      in
+      flake-compatish ../.
+    ).inputs;
+in
 {
   options.nix-csi = {
     enable = lib.mkEnableOption "nix-csi";
@@ -36,5 +55,52 @@
       type = lib.types.str;
       default = "nix-builders";
     };
+
+    package = lib.mkOption {
+      type = lib.types.attrsOf lib.types.package;
+      internal = true;
+    };
+    pkgs = lib.mkOption {
+      type = lib.types.path;
+      default = inputs.nixpkgs;
+      internal = true;
+    };
+    push = lib.mkOption {
+      type = lib.types.bool;
+      internal = true;
+      default = false;
+    };
+    dinix = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      default = inputs.dinix;
+    };
   };
+  config =
+    let
+      crossAttrs = {
+        "x86_64-linux" = "aarch64-linux";
+        "aarch64-linux" = "x86_64-linux";
+      };
+      pkgs = import cfg.pkgs {
+        overlays = [ (import ../pkgs) ];
+      };
+      pkgsCross = import cfg.pkgs {
+        system = crossAttrs.${pkgs.stdenv.hostPlatform.system};
+        overlays = [ (import ../pkgs) ];
+      };
+      package = {
+        ${pkgs.stdenv.hostPlatform.system} = import ../container {
+          inherit pkgs;
+          inherit (cfg) dinix;
+        };
+        ${pkgsCross.stdenv.hostPlatform.system} = import ../container {
+          pkgs = pkgsCross;
+          inherit (cfg) dinix;
+        };
+      };
+    in
+    lib.mkIf cfg.enable {
+      nix-csi.package = package;
+    };
 }

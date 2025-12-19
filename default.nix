@@ -33,49 +33,24 @@ let
   };
   easykubenix = import inputs.easykubenix;
   kubenixApply = kubenixInstance {
-    specialArgs = {
-      nix-csi = {
-        ${pkgs.stdenv.hostPlatform.system} = builtins.unsafeDiscardStringContext (
-          import ./container {
-            inherit pkgs;
-            inherit (inputs) dinix;
-          }
-        );
-        ${pkgsCross.stdenv.hostPlatform.system} = builtins.unsafeDiscardStringContext (
-          import ./container {
-            pkgs = pkgsCross;
-            inherit (inputs) dinix;
-          }
-        );
-      };
+    module = {
+      nix-csi.dinix = inputs.dinix;
     };
   };
   kubenixPush = kubenixInstance {
-    specialArgs = {
-      nix-csi = {
-        ${pkgs.stdenv.hostPlatform.system} = (
-          import ./container {
-            inherit pkgs;
-            inherit (inputs) dinix;
-          }
-        );
-        ${pkgsCross.stdenv.hostPlatform.system} = (
-          import ./container {
-            pkgs = pkgsCross;
-            inherit (inputs) dinix;
-          }
-        );
-      };
+    module = {
+      nix-csi.push = true;
+      nix-csi.dinix = inputs.dinix;
     };
   };
   kubenixInstance =
     {
-      specialArgs ? { },
+      module ? { },
     }:
     easykubenix {
       inherit pkgs;
-      inherit specialArgs;
       modules = [
+        module
         ./kubenix
         {
           config.nix-csi.authorizedKeys = lib.pipe (lib.filesystem.listFilesRecursive ./keys) [
