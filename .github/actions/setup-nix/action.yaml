@@ -18,8 +18,8 @@ runs:
           experimental-features = nix-command flakes
           access-tokens = github.com=${{ inputs.github_token }}
           trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= cache.lix.systems:aBnZUw8zA7H35Cz2RyKFVs3H4PlGTLawyY5KRbvJR8o= nixbuild.net/CHEAKK-1:IvfuR1Ldmkef8pMcSuCl9N2jppEb8KpBzdoB8uKQdxE= nix-csi.cachix.org-1:i4w33gR4efO67jpz8U7g/MdvRQ6mQ3LEF9fB8tES60g=
-          builders = eu.nixbuild.net aarch64-linux;eu.nixbuild.net x86_64-linux
-          substituters = https://cache.nixos.org?priority=1 https://nix-csi.cachix.org?priority=2 https://cache.lix.systems?priority=3 ssh://eu.nixbuild.net?priority=4
+          builders = ssh-ng://eu.nixbuild.net aarch64-linux ; ssh-ng://eu.nixbuild.net x86_64-linux
+          substituters = https://cache.nixos.org?priority=1 https://nix-csi.cachix.org?priority=2 https://cache.lix.systems?priority=3 ssh-ng://eu.nixbuild.net?priority=4
           keep-env-derivations = true
           keep-outputs = true
 

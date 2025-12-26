@@ -1,4 +1,3 @@
-name: "Integration Test"
 on:
   pull_request:
   push:
@@ -15,6 +14,7 @@ env:
 permissions:
   contents: read
   packages: write
+  actions: write
 
 jobs:
   # Build and push all components
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@main
 
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
@@ -33,16 +33,19 @@ jobs:
       # Build and push all components sequentially to reuse Nix store
       - name: Build and push Lix image
         run: |
-          nix run --file liximage.nix push
+          nix build --file liximage.nix push --out-link nix-images
+          ./nix-images/bin/push
 
       - name: Build and push environments
         run: |
-          nix run --file default.nix push
+          nix build --file default.nix push --out-link nix-envs
+          ./nix-envs/bin/push
 
       - name: Build and push scratch image
         run: |
-          nix build --file default.nix uploadScratch
-          sudo -E ./result/bin/uploadScratch
+          nix build --file default.nix uploadScratch --out-link nix-scratches
+          # uploadScratch requires sudo because buildah uses unshare syscall
+          sudo -E ./nix-scratches/bin/uploadScratch
 
   # Test deployment on Kind cluster
   test-kind:
@@ -50,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@main
 
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
@@ -59,51 +62,35 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Kind cluster
-        uses: helm/kind-action@v1
-
-      - name: Generate SSH keys
-        run: |
-          mkdir -p keys
-          ssh-keygen -t ed25519 -f keys/ci-test -N "" -C "ci-test"
-          mv keys/ci-test.pub keys/ci-test.pub
+        uses: helm/kind-action@main
 
       - name: Deploy nix-csi
         run: |
-          nix run --file . kubenixApply.deploymentScript --argstr local "true"
+          nix run --file . kubenixCI.deploymentScript -- --yes
 
       - name: Wait for nix-csi cache pod
         run: |
-          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=cache -n nix-csi --timeout=300s
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=cache -n nix-csi --timeout=60s
 
       - name: Wait for nix-csi node daemonset
         run: |
-          kubectl rollout status daemonset/nix-node -n nix-csi --timeout=300s
+          kubectl rollout status daemonset/nix-node -n nix-csi --timeout=60s
 
       - name: Wait for test workload
         run: |
-          kubectl wait --for=condition=ready pod -l app=ctest -n nix-csi --timeout=300s
-
-      - name: Run integration tests
-        run: |
-          nix run --file . integrationTest
+          kubectl wait --for=condition=complete --timeout=300s job/flake-hello job/expr-hello job/path-hello -n nix-csi
 
       - name: Debug on failure
         if: failure()
         run: |
-          echo "=== Pods in nix-csi namespace ==="
-          kubectl get pods -n nix-csi -o wide
-
-          echo "=== CSI driver info ==="
-          kubectl get csidrivers
+          echo "=== Cluster state ==="
+          kubectl get all -A
 
           echo "=== Cache pod logs ==="
-          kubectl logs -l app.kubernetes.io/name=cache -n nix-csi --tail=100 || true
+          kubectl logs -l app.kubernetes.io/name=cache -n nix-csi || true
 
           echo "=== Node pod logs ==="
-          kubectl logs -l app.kubernetes.io/name=csi -n nix-csi --tail=100 --all-containers || true
-
-          echo "=== Test pod logs ==="
-          kubectl logs -l app=ctest -n nix-csi --tail=100 || true
+          kubectl logs -l app.kubernetes.io/name=csi -n nix-csi --all-containers || true
 
           echo "=== Events ==="
           kubectl get events -n nix-csi --sort-by='.lastTimestamp'

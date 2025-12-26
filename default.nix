@@ -17,16 +17,17 @@ in
     overlays = [ (import ./pkgs) ];
   },
   system ? builtins.currentSystem,
-  local ? null,
 }:
 rec {
   lib = pkgs.lib;
 
   easykubenix = import inputs.easykubenix;
-  kubenixApply = kubenixInstance {
+  kubenixApply = kubenixInstance { };
+  kubenixCI = kubenixInstance {
+    module.imports = [ ./kubenix/ci ];
   };
   kubenixPush = kubenixInstance {
-    module = {
+    module.config = {
       nix-csi.push = true;
     };
   };
@@ -40,38 +41,15 @@ rec {
         module
         ./kubenix
         {
-          config.nix-csi.authorizedKeys = lib.pipe (lib.filesystem.listFilesRecursive ./keys) [
-            (lib.filter (name: lib.hasSuffix ".pub" name))
-            (lib.map (name: builtins.readFile name))
-            (lib.map (key: lib.trim key))
-          ];
-        }
-        {
           config = {
-            nix-csi = {
-              enable = true;
-              version = "develop";
-            }
-            // lib.optionalAttrs (local != null) {
-              cache.storageClassName = "local-path";
-              ctest = {
-                enable = true;
-                replicas = 1;
-              };
-            };
-            kluctl = {
-              discriminator = "nix-csi";
-            }
-            // lib.optionalAttrs (local != null) {
-              preDeployScript =
-                pkgs.writeScriptBin "preDeployScript" # bash
-                  ''
-                    #! ${pkgs.runtimeShell}
-                    set -euo pipefail
-                    set -x
-                    nix copy --no-check-sigs --to ssh-ng://nix@192.168.88.20 "$1" -v || true
-                  '';
-            };
+            # Disabled by default so you can include the module in an easykubenix project
+            nix-csi.enable = true;
+            # Allow easily adding your pubkeys to the cache
+            nix-csi.authorizedKeys = lib.pipe (lib.filesystem.listFilesRecursive ./keys) [
+              (lib.filter (name: lib.hasSuffix ".pub" name))
+              (lib.map (name: builtins.readFile name))
+              (lib.map (key: lib.trim key))
+            ];
           };
         }
       ];
@@ -100,7 +78,6 @@ rec {
       pkgs.kluctl
       pkgs.stern
       pkgs.kubectx
-      pkgs.buildah
       pkgs.skopeo
       pkgs.regctl
     ];
@@ -148,7 +125,14 @@ rec {
       ''
         #! ${pkgs.runtimeShell}
         set -euo pipefail
-        export PATH=${lib.makeBinPath [ pkgs.kubectl pkgs.coreutils pkgs.gnugrep pkgs.jq ]}:$PATH
+        export PATH=${
+          lib.makeBinPath [
+            pkgs.kubectl
+            pkgs.coreutils
+            pkgs.gnugrep
+            pkgs.jq
+          ]
+        }:$PATH
 
         echo "=== Running nix-csi integration tests ==="
 
