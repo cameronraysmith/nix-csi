@@ -109,12 +109,16 @@ The integration test:
 3. Validates CSI driver registration
 4. Confirms cache and node pods are operational
 
-Integration tests run automatically in CI via `.github/workflows/integration-test.yaml` which:
-1. Builds and pushes all components (liximage, environments, scratch)
-2. Creates a Kind cluster
-3. Deploys nix-csi using `kubenixInstance` with `local="true"`
-4. Deploys ctest workload
-5. Runs verification tests
+Integration tests run automatically in CI via `.github/workflows/integration-test.yaml`:
+
+**Build job** (runs once, pushes to cachix and container registry):
+1. Builds and pushes Lix image
+2. Builds and pushes cache/node environments
+3. Builds and pushes scratch image
+
+**Test jobs** (can run in parallel, pull from caches):
+- `test-kind`: Tests deployment on Kind cluster using `kubenixApply` with `local="true"`
+- Future test jobs can be added for different deployment scenarios (e.g., different K8s versions, configurations)
 
 ### Python Development
 

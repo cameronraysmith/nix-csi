@@ -56,7 +56,11 @@ in
       default = "nix-builders";
     };
 
-    package = lib.mkOption {
+    cachePackage = lib.mkOption {
+      type = lib.types.attrsOf lib.types.package;
+      internal = true;
+    };
+    nodePackage = lib.mkOption {
       type = lib.types.attrsOf lib.types.package;
       internal = true;
     };
@@ -93,18 +97,29 @@ in
         system = systemCross;
         overlays = [ (import ../pkgs) ];
       };
-      package = {
-        ${system} = import ../container {
+      cachePackage = {
+        ${system} = import ../environments/cache {
           inherit pkgs;
           inherit (cfg) dinix;
         };
-        ${systemCross} = import ../container {
+        ${systemCross} = import ../environments/cache {
+          pkgs = pkgsCross;
+          inherit (cfg) dinix;
+        };
+      };
+      nodePackage = {
+        ${system} = import ../environments/node {
+          inherit pkgs;
+          inherit (cfg) dinix;
+        };
+        ${systemCross} = import ../environments/node {
           pkgs = pkgsCross;
           inherit (cfg) dinix;
         };
       };
     in
     lib.mkIf cfg.enable {
-      nix-csi.package = package;
+      nix-csi.cachePackage = cachePackage;
+      nix-csi.nodePackage = nodePackage;
     };
 }

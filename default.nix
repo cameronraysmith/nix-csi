@@ -142,4 +142,81 @@ rec {
         buildah manifest add ${scratchManifest} ${scratchUrl "aarch64-linux"}
         buildah manifest push ${scratchManifest}
       '';
+
+  integrationTest =
+    pkgs.writeScriptBin "integrationTest" # bash
+      ''
+        #! ${pkgs.runtimeShell}
+        set -euo pipefail
+        export PATH=${lib.makeBinPath [ pkgs.kubectl pkgs.coreutils pkgs.gnugrep pkgs.jq ]}:$PATH
+
+        echo "=== Running nix-csi integration tests ==="
+
+        # Check that ctest pods are running
+        echo "Checking ctest pods..."
+        CTEST_PODS=$(kubectl get pods -n nix-csi -l app=ctest -o json | jq -r '.items | length')
+        if [ "$CTEST_PODS" -eq 0 ]; then
+          echo "ERROR: No ctest pods found"
+          exit 1
+        fi
+        echo "Found $CTEST_PODS ctest pod(s)"
+
+        # Get a ctest pod name
+        POD_NAME=$(kubectl get pods -n nix-csi -l app=ctest -o jsonpath='{.items[0].metadata.name}')
+        echo "Testing with pod: $POD_NAME"
+
+        # Verify /nix mount exists
+        echo "Verifying /nix mount exists..."
+        if ! kubectl exec -n nix-csi "$POD_NAME" -- test -d /nix/store; then
+          echo "ERROR: /nix/store directory not found in pod"
+          exit 1
+        fi
+        echo "✓ /nix/store mount verified"
+
+        # Verify the binary from ctest works
+        echo "Verifying ctest binary is accessible..."
+        if ! kubectl exec -n nix-csi "$POD_NAME" -- which big-binary; then
+          echo "ERROR: big-binary not found in PATH"
+          exit 1
+        fi
+        echo "✓ Binary found in PATH"
+
+        # Verify we can list Nix store contents
+        echo "Verifying Nix store contents..."
+        STORE_ITEMS=$(kubectl exec -n nix-csi "$POD_NAME" -- sh -c "ls /nix/store | wc -l")
+        if [ "$STORE_ITEMS" -lt 1 ]; then
+          echo "ERROR: Nix store appears empty"
+          exit 1
+        fi
+        echo "✓ Found $STORE_ITEMS items in Nix store"
+
+        # Check CSI driver registration
+        echo "Verifying CSI driver registration..."
+        if ! kubectl get csidrivers nix.csi.store; then
+          echo "ERROR: CSI driver not registered"
+          exit 1
+        fi
+        echo "✓ CSI driver registered"
+
+        # Check node pods are running
+        echo "Verifying node pods..."
+        NODE_PODS=$(kubectl get pods -n nix-csi -l app.kubernetes.io/name=csi -o json | jq -r '.items | length')
+        if [ "$NODE_PODS" -eq 0 ]; then
+          echo "ERROR: No CSI node pods found"
+          exit 1
+        fi
+        echo "✓ Found $NODE_PODS CSI node pod(s)"
+
+        # Check cache pod is running
+        echo "Verifying cache pod..."
+        CACHE_PODS=$(kubectl get pods -n nix-csi -l app.kubernetes.io/name=cache -o json | jq -r '.items | length')
+        if [ "$CACHE_PODS" -eq 0 ]; then
+          echo "ERROR: No cache pods found"
+          exit 1
+        fi
+        echo "✓ Found $CACHE_PODS cache pod(s)"
+
+        echo ""
+        echo "=== All integration tests passed! ==="
+      '';
 }

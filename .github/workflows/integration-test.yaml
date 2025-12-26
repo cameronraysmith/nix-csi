@@ -1,0 +1,109 @@
+name: "Integration Test"
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+env:
+  REPO_USERNAME: ${{ github.actor }}
+  REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Build and push all components
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Nix environment
+        uses: ./.github/actions/setup-nix
+        with:
+          nixbuild_key: ${{ secrets.NIXBUILD_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build and push all components sequentially to reuse Nix store
+      - name: Build and push Lix image
+        run: |
+          nix run --file liximage.nix push
+
+      - name: Build and push environments
+        run: |
+          nix run --file default.nix push
+
+      - name: Build and push scratch image
+        run: |
+          nix build --file default.nix uploadScratch
+          sudo -E ./result/bin/uploadScratch
+
+  # Test deployment on Kind cluster
+  test-kind:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Nix environment
+        uses: ./.github/actions/setup-nix
+        with:
+          nixbuild_key: ${{ secrets.NIXBUILD_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+
+      - name: Generate SSH keys
+        run: |
+          mkdir -p keys
+          ssh-keygen -t ed25519 -f keys/ci-test -N "" -C "ci-test"
+          mv keys/ci-test.pub keys/ci-test.pub
+
+      - name: Deploy nix-csi
+        run: |
+          nix run --file . kubenixApply.deploymentScript --argstr local "true"
+
+      - name: Wait for nix-csi cache pod
+        run: |
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=cache -n nix-csi --timeout=300s
+
+      - name: Wait for nix-csi node daemonset
+        run: |
+          kubectl rollout status daemonset/nix-node -n nix-csi --timeout=300s
+
+      - name: Wait for test workload
+        run: |
+          kubectl wait --for=condition=ready pod -l app=ctest -n nix-csi --timeout=300s
+
+      - name: Run integration tests
+        run: |
+          nix run --file . integrationTest
+
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "=== Pods in nix-csi namespace ==="
+          kubectl get pods -n nix-csi -o wide
+
+          echo "=== CSI driver info ==="
+          kubectl get csidrivers
+
+          echo "=== Cache pod logs ==="
+          kubectl logs -l app.kubernetes.io/name=cache -n nix-csi --tail=100 || true
+
+          echo "=== Node pod logs ==="
+          kubectl logs -l app.kubernetes.io/name=csi -n nix-csi --tail=100 --all-containers || true
+
+          echo "=== Test pod logs ==="
+          kubectl logs -l app=ctest -n nix-csi --tail=100 || true
+
+          echo "=== Events ==="
+          kubectl get events -n nix-csi --sort-by='.lastTimestamp'
