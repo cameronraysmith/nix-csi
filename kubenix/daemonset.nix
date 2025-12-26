@@ -78,7 +78,6 @@ in
                       lib.mkNamedList {
                         CSI_ENDPOINT.value = "unix:///csi/csi.sock";
                         HOME.value = "/nix/var/nix-csi/root";
-                        KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
                         KUBE_NODE_NAME.valueFrom.fieldRef.fieldPath = "spec.nodeName";
                         KUBE_POD_IP.valueFrom.fieldRef.fieldPath = "status.podIP";
                         USER.value = "root";
