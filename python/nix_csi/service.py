@@ -33,44 +33,8 @@ NIX_ROOT = Path("/")
 CSI_ROOT = NIX_ROOT / "nix/var/nix-csi"
 CSI_VOLUMES = CSI_ROOT / "volumes"
 CSI_GCROOTS = NIX_ROOT / "nix/var/nix/gcroots/nix-csi"
-NAMESPACE = os.environ["KUBE_NAMESPACE"]
 
 RSYNC_CONCURRENCY = Semaphore(1)
-
-
-def get_kernel_boot_time(stat_file: Path = Path("/proc/stat")) -> int:
-    """Returns kernel boot time as Unix timestamp."""
-    for line in stat_file.read_text().splitlines():
-        if line.startswith("btime "):
-            return int(line.split()[1].strip())
-    raise RuntimeError("btime not found in /hoststat")
-
-
-def reboot_cleanup():
-    """Cleanup volume trees and gcroots if we have rebooted"""
-    stat_file = Path("/proc/stat")
-    state_file = CSI_ROOT / "proc_stat"
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-
-    needs_cleanup = False
-    if state_file.exists():
-        try:
-            old_boot = get_kernel_boot_time(state_file)
-            current_boot = get_kernel_boot_time(stat_file)
-            needs_cleanup = old_boot != current_boot
-        except RuntimeError:
-            # Corrupted state file, treat as needing cleanup
-            needs_cleanup = True
-
-    shutil.copy2(stat_file, state_file)
-
-    if needs_cleanup:
-        logger.info("Reboot detected - cleaning volumes and gcroots")
-        for path in [CSI_VOLUMES, CSI_GCROOTS]:
-            if path.exists():
-                shutil.rmtree(path)
-                path.mkdir(parents=True, exist_ok=True)
-
 
 async def get_current_system():
     return (
@@ -82,8 +46,6 @@ async def get_current_system():
 
 def initialize():
     logger.info("Initializing NodeServicer")
-    # Clean old volumes on startup
-    reboot_cleanup()
     # Create directories we operate in
     CSI_ROOT.mkdir(parents=True, exist_ok=True)
     CSI_VOLUMES.mkdir(parents=True, exist_ok=True)
