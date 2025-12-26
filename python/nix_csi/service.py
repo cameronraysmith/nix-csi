@@ -76,35 +76,22 @@ class NodeServicer(csi_grpc.NodeBase):
             gcPath = CSI_GCROOTS / request.volume_id
 
             if storePath is not None:
-                packagePath = Path(storePath)
-                if not packagePath.exists():
-                    logger.debug(f"{storePath=}")
+                async with self.volumeLocks[storePath]:
+                    packagePath = Path(storePath)
+                    if not packagePath.exists():
+                        logger.debug(f"{storePath=}")
 
-                    # Fetch storePath from caches
-                    await try_console(
-                        "nix",
-                        "build",
-                        "--out-link",
-                        gcPath,
-                        packagePath,
-                    )
+                        # Fetch storePath from caches
+                        await try_console(
+                            "nix",
+                            "build",
+                            "--out-link",
+                            gcPath,
+                            packagePath,
+                        )
             elif flakeRef is not None:
-                logger.debug(f"{flakeRef=}")
-
-                # Fetch storePath from caches
-                result = await try_console(
-                    "nix",
-                    "build",
-                    "--print-out-paths",
-                    "--out-link",
-                    gcPath,
-                    flakeRef,
-                )
-                packagePath = Path(result.stdout.splitlines()[0])
-            elif nixExpr is not None:
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".nix") as tmp:
-                    tmp.write(nixExpr)
-                    tmp.flush()
+                async with self.volumeLocks[flakeRef]:
+                    logger.debug(f"{flakeRef=}")
 
                     # Fetch storePath from caches
                     result = await try_console(
@@ -113,20 +100,36 @@ class NodeServicer(csi_grpc.NodeBase):
                         "--print-out-paths",
                         "--out-link",
                         gcPath,
-                        "--file",
-                        tmp.name,
+                        flakeRef,
                     )
                     packagePath = Path(result.stdout.splitlines()[0])
+            elif nixExpr is not None:
+                async with self.volumeLocks[nixExpr]:
+                    with tempfile.NamedTemporaryFile(mode="w", suffix=".nix") as tmp:
+                        tmp.write(nixExpr)
+                        tmp.flush()
+
+                        # Fetch storePath from caches
+                        result = await try_console(
+                            "nix",
+                            "build",
+                            "--print-out-paths",
+                            "--out-link",
+                            gcPath,
+                            "--file",
+                            tmp.name,
+                        )
+                        packagePath = Path(result.stdout.splitlines()[0])
             else:
                 raise GRPCError(
                     Status.INVALID_ARGUMENT,
-                    f"Volume doesn't have storePath configured for {self.system}",
+                    f"Volume doesn't have correct volumeAttributes for {self.system}",
                 )
 
             if not packagePath.exists():
                 raise GRPCError(
                     Status.INVALID_ARGUMENT,
-                    "packagePath passed through all steps yet doesn't exist",
+                    "packagePath turned out invalid",
                 )
 
             # Root directory for volume. Contains /nix, also contains "workdir" and
