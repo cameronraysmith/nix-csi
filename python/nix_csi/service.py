@@ -54,7 +54,6 @@ def initialize():
 
 class NodeServicer(csi_grpc.NodeBase):
     # Cache positive Nix commands
-    pathInfoCache: TTLCache[Path, List[str]] = TTLCache(math.inf, 60)
     volumeLocks: defaultdict[str, Semaphore] = defaultdict(Semaphore)
 
     def __init__(self, system: str):
@@ -139,19 +138,12 @@ class NodeServicer(csi_grpc.NodeBase):
             NIX_STATE_DIR.mkdir(parents=True, exist_ok=True)
 
             # Get closure
-            paths = []
-            pathInfoCacheResult = self.pathInfoCache.get(packagePath)
-            if pathInfoCacheResult is not None:
-                paths = pathInfoCacheResult
-            else:
-                pathInfo = await try_captured(
-                    "nix",
-                    "path-info",
-                    "--recursive",
-                    packagePath,
-                )
-                paths = pathInfo.stdout.splitlines()
-                self.pathInfoCache[packagePath] = paths
+            paths = (await try_captured(
+                "nix",
+                "path-info",
+                "--recursive",
+                packagePath,
+            )).stdout.splitlines()
 
             try:
                 # This try block is essentially nix copy into a chroot store with
